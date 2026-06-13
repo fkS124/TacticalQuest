@@ -1,0 +1,41 @@
+import 'leaflet/dist/leaflet.css';
+import './styles/app.css';
+import { loadSession } from './state';
+import { initHome, showHome } from './views/home';
+import { enterMap, initMapView, toast } from './views/mapView';
+
+initHome();
+initMapView();
+
+// Une session en sessionStorage survit au reload / mise en veille :
+// retour direct sur la carte, le socket fera le rejoin.
+if (loadSession()) enterMap();
+else showHome();
+
+registerServiceWorker();
+
+function registerServiceWorker(): void {
+  if (!('serviceWorker' in navigator) || !import.meta.env.PROD) return;
+  void navigator.serviceWorker.register('/sw.js').then((reg) => {
+    // Jamais de skip-waiting automatique sur une app tactique : on propose,
+    // l'utilisateur décide quand recharger.
+    reg.addEventListener('updatefound', () => {
+      const worker = reg.installing;
+      if (!worker) return;
+      worker.addEventListener('statechange', () => {
+        if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+          toast('Mise à jour disponible.', {
+            label: 'Recharger',
+            onClick: () => worker.postMessage('SKIP_WAITING'),
+          });
+        }
+      });
+    });
+  });
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return;
+    reloading = true;
+    location.reload();
+  });
+}

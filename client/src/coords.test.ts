@@ -1,0 +1,51 @@
+import { describe, expect, it } from 'vitest';
+import { forward as mgrsForward } from 'mgrs';
+import { formatCoords, latitudeBand, toUtm, utmZone } from './coords';
+
+// Notre UTM est validé par recoupement avec le paquet mgrs : dans un carré
+// de 100 km, les chiffres MGRS sont l'easting/northing UTM modulo 100 000.
+const SAMPLES: [string, number, number][] = [
+  ['Grenoble', 45.1885, 5.7245],
+  ['Brest', 48.39, -4.486],
+  ['Sydney (hémisphère sud)', -33.8688, 151.2093],
+  ['Oslo (exception Norvège z32)', 59.91, 5.5],
+  ['Quito (équateur)', -0.18, -78.47],
+];
+
+describe('toUtm — recoupement avec la grille MGRS', () => {
+  for (const [name, lat, lng] of SAMPLES) {
+    it(name, () => {
+      const utm = toUtm(lat, lng);
+      const raw = mgrsForward([lng, lat], 5);
+      const m = /^(\d{1,2})([C-X])([A-Z]{2})(\d{5})(\d{5})$/.exec(raw)!;
+      expect(utm.zone).toBe(Number(m[1]));
+      expect(utm.band).toBe(m[2]);
+      expect(Math.floor(utm.easting) % 100000).toBeCloseTo(Number(m[4]), -1);
+      expect(Math.floor(utm.northing) % 100000).toBeCloseTo(Number(m[5]), -1);
+    });
+  }
+});
+
+describe('zones et bandes', () => {
+  it('zone standard', () => expect(utmZone(45, 5.7)).toBe(31));
+  it('exception sud-Norvège', () => expect(utmZone(60, 5)).toBe(32));
+  it('exception Svalbard', () => expect(utmZone(78, 20)).toBe(33));
+  it('bandes de latitude', () => {
+    expect(latitudeBand(45.1)).toBe('T');
+    expect(latitudeBand(-33.9)).toBe('H');
+    expect(latitudeBand(60)).toBe('V');
+  });
+});
+
+describe('formatage', () => {
+  it('MGRS espacé', () => {
+    expect(formatCoords(45.1885, 5.7245, 'mgrs')).toBe('31T GL 14026 07502');
+  });
+  it('UTM', () => {
+    expect(formatCoords(45.1885, 5.7245, 'utm')).toMatch(/^31T \d{6} \d{7}$/);
+  });
+  it('géographique', () => {
+    expect(formatCoords(45.1885, 5.7245, 'latlng')).toBe('45.18850°N 5.72450°E');
+    expect(formatCoords(-33.8688, -70.6, 'latlng')).toBe('33.86880°S 70.60000°O');
+  });
+});

@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#1a2a1a" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <title>TacticalQuest</title>
+</head>
+<body class="screen-home">
+
+  <!-- Écran d'accueil : créer ou rejoindre -->
+  <main id="home">
+    <h1>TacticalQuest</h1>
+    <p class="subtitle">Carte tactique collaborative</p>
+
+    <label class="field">
+      <span>Indicatif</span>
+      <input id="callsign" type="text" maxlength="16" autocomplete="off"
+             placeholder="Alpha 1" enterkeyhint="done" />
+    </label>
+
+    <div class="field">
+      <span>Symbole</span>
+      <div id="symbol-grid" role="listbox" aria-label="Choix du symbole"></div>
+    </div>
+
+    <button id="btn-create" class="btn btn-primary">Créer une salle</button>
+
+    <div class="separator"><span>ou</span></div>
+
+    <div class="join-row">
+      <input id="join-code" type="text" maxlength="6" autocomplete="off"
+             autocapitalize="characters" placeholder="CODE" enterkeyhint="go" />
+      <button id="btn-join" class="btn">Rejoindre</button>
+    </div>
+
+    <p id="home-error" class="error" hidden></p>
+  </main>
+
+  <!-- Écran carte -->
+  <div id="map-screen">
+    <div id="map"></div>
+
+    <button id="btn-members" class="status-pill" title="Membres et salle">
+      <span id="conn-dot" class="conn-reconnecting"></span>
+      <span id="member-count">0</span>
+    </button>
+
+    <div id="crosshair" aria-hidden="true"></div>
+    <button id="coord-readout" title="Coordonnées du centre — tapez pour changer de format"></button>
+
+    <div id="tools">
+      <button id="tool-measure" class="tool-btn" title="Mesurer une distance">📏</button>
+      <button id="tool-eni" class="tool-btn" title="Plot ennemi">◆</button>
+      <button id="tool-line" class="tool-btn leader-only" title="Tracer un liseré">▬</button>
+      <button id="tool-arrow" class="tool-btn leader-only" title="Tracer une flèche">➤</button>
+    </div>
+
+    <div id="sketchbar" hidden>
+      <span id="sketch-info">0 m</span>
+      <div id="sketch-colors" hidden>
+        <button class="color-dot" data-color="#e8d44d" style="background:#e8d44d"></button>
+        <button class="color-dot" data-color="#4f9dd9" style="background:#4f9dd9"></button>
+        <button class="color-dot" data-color="#c0564f" style="background:#c0564f"></button>
+      </div>
+      <button id="sketch-undo" class="btn" title="Retirer le dernier point">↩</button>
+      <button id="sketch-add" class="btn" title="Poser un point sous le réticule">+ Pt</button>
+      <button id="sketch-cancel" class="btn">✕</button>
+      <button id="sketch-ok" class="btn btn-primary">OK</button>
+    </div>
+
+    <button id="btn-locate" class="fab" title="Centrer sur moi">◎</button>
+
+    <aside id="drawer" hidden>
+      <header class="drawer-head">
+        <span class="drawer-label">Salle</span>
+        <button id="room-code-btn" class="topbar-btn" title="Copier / partager le code"></button>
+        <span class="topbar-spacer"></span>
+        <button id="btn-leave" class="topbar-btn topbar-danger">Quitter</button>
+      </header>
+      <h2>Membres</h2>
+      <ul id="member-list"></ul>
+      <h2>Options</h2>
+      <div class="option-row">
+        <span>Coordonnées</span>
+        <div id="coord-format" class="segmented">
+          <button data-fmt="mgrs">MGRS</button>
+          <button data-fmt="utm">UTM</button>
+          <button data-fmt="latlng">Géo</button>
+        </div>
+      </div>
+    </aside>
+
+    <div id="geo-overlay" class="overlay" hidden>
+      <div class="overlay-card">
+        <h2>Position indisponible</h2>
+        <p>L'accès à la position est refusé ou indisponible. Les autres membres ne
+           verront pas votre position, mais la carte reste fonctionnelle.</p>
+        <p>Autorisez la localisation dans les réglages du navigateur, puis réessayez.</p>
+        <button id="btn-geo-retry" class="btn btn-primary">Réessayer</button>
+        <button id="btn-geo-dismiss" class="btn">Continuer sans position</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" hidden>
+    <span id="toast-text"></span>
+    <button id="toast-action" class="btn" hidden></button>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
