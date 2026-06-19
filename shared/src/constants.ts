@@ -11,7 +11,7 @@ export const CALLSIGN_REGEX = /^[\p{L}\p{N} _-]{1,16}$/u;
 // SIDC lettre (2525C, 10-15 car.) ou numérique (APP-6D, 20-30 chiffres).
 // Le serveur ne l'interprète pas, il borne juste le format.
 export const SIDC_REGEX = /^[A-Za-z0-9*-]{10,30}$/;
-export const DEFAULT_SIDC = 'SFGPUCI----'; // infanterie amie
+export const DEFAULT_SIDC = 'SFGPE----------'; // CDS (rond, chef de section)
 
 // Reconnexion : un membre déconnecté est conservé pendant la période de
 // grâce (re-binding via sessionToken) et reste visible en grisé par les
@@ -29,12 +29,13 @@ export const ROOM_CREATE_PER_IP_PER_HOUR = 10;
 export const FAILED_JOIN_DELAY_MS = 1_000;
 
 // Ordres (phase 5 — le serveur les relaie sans les interpréter).
-export const MAX_RECENT_ORDERS = 50;
+// Missions + accusés de réception s'accumulent : marge confortable.
+export const MAX_RECENT_ORDERS = 250;
 export const MAX_ORDER_BYTES = 16_384;
 
-// Côté client : throttle d'envoi des positions.
-export const POSITION_SEND_INTERVAL_MS = 3_000;
-export const POSITION_KEEPALIVE_MS = 30_000;
-export const POSITION_MIN_DISTANCE_M = 5;
-export const POSITION_MIN_HEADING_DEG = 15;
-export const STALE_AFTER_MS = 30_000;
+// Côté client : cadence d'échantillonnage de la position. Volontairement lente
+// et en basse précision (récepteur GPS éteint entre deux fixes) — les batteries
+// sont comptées sur le terrain. Un point dès l'arrivée sur le site, puis un
+// point toutes les 30 s tant que la page est au premier plan (la géoloc écran
+// verrouillé a été abandonnée).
+export const POSITION_INTERVAL_MS = 30_000;

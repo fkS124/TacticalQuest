@@ -1,24 +1,48 @@
 import L from 'leaflet';
 import ms from 'milsymbol';
 
-/** Choix proposés dans le sélecteur (2525C, unités amies terrestres). */
+// Choix proposés dans le sélecteur (2525C, identité amie → cadre bleu).
+// Cadre rond (équipement, `…E……`) pour les postes de commandement CDS / CDU,
+// cadre rectangle (unité, `…U……`) pour les éléments GCT / SCT. Le sigle est
+// dessiné AU CENTRE du cadre (voir `decorateUnit`), et l'échelon (positions
+// 11-12) ajoute les points bleus au-dessus des rectangles : section (C,
+// 2 points) pour GCT, peloton (D, 3 points) pour SCT. Les ronds n'ont pas
+// d'échelon. CDS / CDU sont deux ronds identiques au cadre près : on les
+// distingue par un champ inerte du SIDC (indicatif de pays, non rendu).
 export const SYMBOL_CHOICES: { sidc: string; label: string }[] = [
-  { sidc: 'SFGPUCI----', label: 'Infanterie' },
-  { sidc: 'SFGPUCIZ---', label: 'Inf. mécanisée' },
-  { sidc: 'SFGPUCR----', label: 'Reconnaissance' },
-  { sidc: 'SFGPUCA----', label: 'Blindé' },
-  { sidc: 'SFGPUCAA---', label: 'Antichar' },
-  { sidc: 'SFGPUCF----', label: 'Artillerie' },
-  { sidc: 'SFGPUCFM---', label: 'Mortier' },
-  { sidc: 'SFGPUCE----', label: 'Génie' },
-  { sidc: 'SFGPUUS----', label: 'Transmissions' },
-  { sidc: 'SFGPUSM----', label: 'Sanitaire' },
-  { sidc: 'SFGPUSS----', label: 'Ravitaillement' },
-  { sidc: 'SFGPUH-----', label: 'PC' },
+  { sidc: 'SFGPE----------', label: 'CDS' }, // rond — chef de section
+  { sidc: 'SFGPE--------A--', label: 'CDU' }, // rond — commandant d'unité
+  { sidc: 'SFGPU------C---', label: 'GCT' }, // rectangle + 2 points — groupe de combat
+  { sidc: 'SFGPU------D---', label: 'SCT' }, // rectangle + 3 points — section
 ];
 
+// SIDC → sigle à inscrire dans le cadre.
+const UNIT_LABELS = new Map(SYMBOL_CHOICES.map((c) => [c.sidc, c.label]));
+
+// Bleu ami milsymbol (remplissage des cadres) — réutilisé pour les points
+// d'échelon, noirs par défaut, afin de respecter « garder le bleu ».
+const FRIENDLY_BLUE = 'rgb(128,224,255)';
+
+/**
+ * Post-traite le SVG milsymbol d'une unité connue : recolore en bleu les points
+ * d'échelon (noirs à l'origine) et inscrit le sigle au centre du cadre. Le
+ * repère interne de milsymbol place toujours le centre du cadre en (100, 100),
+ * quel que soit le `viewBox`. Sans correspondance, le SVG est renvoyé tel quel.
+ */
+function decorateUnit(svg: string, sidc: string): string {
+  const label = UNIT_LABELS.get(sidc);
+  if (!label) return svg;
+  // Les seuls éléments noirs de ces symboles (fonction vide) sont les points
+  // d'échelon : on peut donc recolorer sans toucher au cadre ni au tracé.
+  const blue = svg.replace(/fill="black"/g, `fill="${FRIENDLY_BLUE}"`);
+  const text =
+    `<text x="100" y="100" text-anchor="middle" dominant-baseline="central" ` +
+    `font-family="monospace" font-weight="700" font-size="42" fill="#0a0a0a">${label}</text>`;
+  return blue.replace('</svg>', `${text}</svg>`);
+}
+
 export interface IconOpts {
-  stale: boolean;
+  /** Grisé tant que le membre n'est pas (re)connecté. */
   disconnected: boolean;
   self: boolean;
 }
@@ -28,7 +52,7 @@ export interface IconOpts {
 const iconCache = new Map<string, L.DivIcon>();
 
 export function getIcon(sidc: string, o: IconOpts): L.DivIcon {
-  const key = `${sidc}|${o.stale ? 1 : 0}${o.disconnected ? 1 : 0}${o.self ? 1 : 0}`;
+  const key = `${sidc}|${o.disconnected ? 1 : 0}${o.self ? 1 : 0}`;
   const cached = iconCache.get(key);
   if (cached) return cached;
 
@@ -36,12 +60,11 @@ export function getIcon(sidc: string, o: IconOpts): L.DivIcon {
   const { width, height } = sym.getSize();
   const anchor = sym.getAnchor();
   const classes = ['tq-sym'];
-  if (o.stale) classes.push('is-stale');
   if (o.disconnected) classes.push('is-disconnected');
   if (o.self) classes.push('is-self');
 
   const icon = L.divIcon({
-    html: sym.asSVG(),
+    html: decorateUnit(sym.asSVG(), sidc),
     className: classes.join(' '),
     iconSize: [width, height],
     iconAnchor: [anchor.x, anchor.y],
@@ -52,7 +75,7 @@ export function getIcon(sidc: string, o: IconOpts): L.DivIcon {
 
 /** SVG brut, pour le sélecteur et la liste des membres. */
 export function symbolSvg(sidc: string, size = 26): string {
-  return new ms.Symbol(sidc, { size }).asSVG();
+  return decorateUnit(new ms.Symbol(sidc, { size }).asSVG(), sidc);
 }
 
 /** Losange rouge APP-6 : unité terrestre hostile, sans fonction. */

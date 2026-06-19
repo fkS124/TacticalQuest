@@ -1,10 +1,6 @@
-import {
-  POSITION_KEEPALIVE_MS,
-  POSITION_MIN_DISTANCE_M,
-  POSITION_MIN_HEADING_DEG,
-  POSITION_SEND_INTERVAL_MS,
-} from '@tq/shared/constants';
+import { POSITION_INTERVAL_MS } from '@tq/shared/constants';
 import type { Position } from '@tq/shared/protocol';
+import { dlog } from './debugLog';
 
 /** Distance haversine en mètres. */
 export function distanceM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -16,36 +12,6 @@ export function distanceM(a: { lat: number; lng: number }, b: { lat: number; lng
   const h =
     Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
-}
-
-function headingDelta(a: number, b: number): number {
-  const d = Math.abs(a - b) % 360;
-  return d > 180 ? 360 - d : d;
-}
-
-/**
- * Throttle d'envoi (batterie + bande passante) :
- * max 1 fix / POSITION_SEND_INTERVAL_MS, et seulement si déplacement ou
- * changement de cap significatif — sauf keepalive périodique à l'arrêt.
- */
-export function shouldSend(
-  lastSent: Position | null,
-  next: Position,
-  lastSentAt: number,
-  now: number,
-): boolean {
-  if (now - lastSentAt < POSITION_SEND_INTERVAL_MS) return false;
-  if (!lastSent) return true;
-  if (now - lastSentAt >= POSITION_KEEPALIVE_MS) return true;
-  if (distanceM(lastSent, next) > POSITION_MIN_DISTANCE_M) return true;
-  if (
-    lastSent.heading !== null &&
-    next.heading !== null &&
-    headingDelta(lastSent.heading, next.heading) > POSITION_MIN_HEADING_DEG
-  ) {
-    return true;
-  }
-  return false;
 }
 
 export interface GeoHandlers {
@@ -65,60 +31,73 @@ export interface GeoWatcher {
   resend: () => void;
 }
 
+/**
+ * Échantillonnage périodique basse consommation. Contrairement à un
+ * `watchPosition` haute précision (récepteur GPS allumé en continu = principal
+ * poste de dépense), on prend un point ponctuel à intervalle fixe, en précision
+ * réduite, et on laisse l'OS réutiliser un fix récent (`maximumAge`). Entre deux
+ * échantillons, le GPS reste éteint.
+ *
+ * Un point est pris dès l'arrivée (appel), puis toutes les 30 s. La page doit
+ * rester au premier plan : la géoloc écran verrouillé a été abandonnée (les
+ * navigateurs mobiles gèlent les timers et le GPS en arrière-plan).
+ */
 export function startGeolocation(handlers: GeoHandlers): GeoWatcher | null {
   if (!('geolocation' in navigator)) {
     handlers.onDenied();
     return null;
   }
 
-  let lastSent: Position | null = null;
-  let lastSentAt = 0;
   let lastFix: Position | null = null;
-  // Le keepalive est porté par un timer : watchPosition ne rappelle pas
-  // quand l'appareil est immobile.
-  let keepalive: ReturnType<typeof setInterval> | null = null;
+  let timer: ReturnType<typeof setInterval> | null = null;
 
-  const emit = (p: Position) => {
-    lastSent = p;
-    lastSentAt = Date.now();
-    handlers.send(p);
+  const takeFix = (): void => {
+    dlog('gps', 'acquisition…');
+    navigator.geolocation.getCurrentPosition(
+      (gp) => {
+        const p: Position = {
+          lat: gp.coords.latitude,
+          lng: gp.coords.longitude,
+          accuracy: gp.coords.accuracy,
+          heading: gp.coords.heading !== null && !Number.isNaN(gp.coords.heading) ? gp.coords.heading : null,
+          speed: gp.coords.speed !== null && !Number.isNaN(gp.coords.speed) ? gp.coords.speed : null,
+          ts: gp.timestamp,
+        };
+        const ageS = Math.round((Date.now() - gp.timestamp) / 1000);
+        dlog('gps', `OK ${p.lat.toFixed(5)},${p.lng.toFixed(5)} ±${Math.round(p.accuracy)}m age=${ageS}s`);
+        lastFix = p;
+        handlers.onFix?.(p);
+        handlers.send(p);
+      },
+      (err) => {
+        dlog('gps', `ERR code=${err.code} ${err.message}`);
+        if (err.code === err.PERMISSION_DENIED) handlers.onDenied();
+        else handlers.onUnavailable?.();
+      },
+      // enableHighAccuracy:false → localisation basse conso (réseau/cache OS,
+      // récepteur GPS non sollicité) ; maximumAge réutilise un point récent
+      // plutôt que de relancer une acquisition.
+      {
+        enableHighAccuracy: false,
+        maximumAge: Math.max(0, POSITION_INTERVAL_MS - 15_000),
+        timeout: 30_000,
+      },
+    );
   };
 
-  const watchId = navigator.geolocation.watchPosition(
-    (gp) => {
-      const p: Position = {
-        lat: gp.coords.latitude,
-        lng: gp.coords.longitude,
-        accuracy: gp.coords.accuracy,
-        heading: gp.coords.heading !== null && !Number.isNaN(gp.coords.heading) ? gp.coords.heading : null,
-        speed: gp.coords.speed !== null && !Number.isNaN(gp.coords.speed) ? gp.coords.speed : null,
-        ts: gp.timestamp,
-      };
-      lastFix = p;
-      handlers.onFix?.(p);
-      if (shouldSend(lastSent, p, lastSentAt, Date.now())) emit(p);
-    },
-    (err) => {
-      if (err.code === err.PERMISSION_DENIED) handlers.onDenied();
-      else handlers.onUnavailable?.();
-    },
-    { enableHighAccuracy: true, maximumAge: 3_000, timeout: 15_000 },
-  );
-
-  keepalive = setInterval(() => {
-    if (lastFix && Date.now() - lastSentAt >= POSITION_KEEPALIVE_MS) {
-      emit({ ...lastFix, ts: Date.now() });
-    }
-  }, POSITION_KEEPALIVE_MS / 2);
+  takeFix(); // premier point dès l'arrivée, sans attendre le premier intervalle
+  timer = setInterval(takeFix, POSITION_INTERVAL_MS);
 
   return {
     stop() {
-      navigator.geolocation.clearWatch(watchId);
-      if (keepalive) clearInterval(keepalive);
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
     },
     getLastFix: () => lastFix,
     resend() {
-      if (lastFix) emit({ ...lastFix, ts: Date.now() });
+      if (lastFix) handlers.send({ ...lastFix, ts: Date.now() });
     },
   };
 }

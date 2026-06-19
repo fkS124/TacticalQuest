@@ -1,12 +1,15 @@
 :root {
-  --bg: #10160f;
-  --panel: #1a2a1a;
-  --panel-2: #233823;
-  --text: #e4ead8;
-  --muted: #9aa890;
-  --accent: #7da455;
-  --danger: #c0564f;
-  --warn: #d9a13b;
+  --bg: #0f1411;
+  --panel: #18201b;
+  --panel-2: #283228;
+  --line: #354139;
+  --text: #e6eadf;
+  --muted: #93a08f;
+  --accent: #8aa86a;
+  --accent-ink: #0f1411;
+  --danger: #c25b53;
+  --warn: #d2a24a;
+  --radius: 7px;
 }
 
 * { box-sizing: border-box; }
@@ -72,7 +75,7 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
   padding: 12px 18px;
 }
 .btn:active { filter: brightness(1.2); }
-.btn-primary { background: var(--accent); color: #101507; font-weight: 600; }
+.btn-primary { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .btn[disabled] { opacity: 0.5; }
 
 .separator {
@@ -113,14 +116,14 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
 /* Pastille flottante : état connexion + effectif, ouvre le tiroir */
 .status-pill {
   align-items: center;
-  background: var(--panel);
-  border: 1px solid var(--panel-2);
+  background: rgba(24, 32, 27, 0.92);
+  border: 1px solid var(--line);
   border-radius: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
   color: var(--text);
   cursor: pointer;
   display: flex;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
   gap: 8px;
   min-height: 40px;
@@ -130,6 +133,17 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
   top: calc(10px + env(safe-area-inset-top, 0px));
   z-index: 1100;
 }
+#pending-badge {
+  background: var(--warn);
+  border-radius: 9px;
+  color: var(--accent-ink);
+  font-size: 0.72rem;
+  font-weight: 700;
+  min-width: 18px;
+  padding: 1px 5px;
+  text-align: center;
+}
+#pending-badge[hidden] { display: none; }
 
 /* Réticule fixe au centre de l'écran */
 #crosshair {
@@ -201,7 +215,7 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
 }
 .segmented button:first-child { border-radius: 8px 0 0 8px; }
 .segmented button:last-child { border-radius: 0 8px 8px 0; }
-.segmented button.selected { background: var(--accent); color: #101507; font-weight: 600; }
+.segmented button.selected { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 
 .order-popup .coords { font-family: ui-monospace, monospace; font-size: 0.85rem; }
 
@@ -241,20 +255,21 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
 @keyframes pulse { 50% { opacity: 0.35; } }
 
 .fab {
-  background: var(--panel);
-  border: 1px solid var(--panel-2);
+  align-items: center;
+  background: rgba(24, 32, 27, 0.92);
+  border: 1px solid var(--line);
   border-radius: 50%;
-  bottom: 24px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
   color: var(--text);
   cursor: pointer;
-  font-size: 1.5rem;
-  height: 56px;
-  position: absolute;
-  right: 16px;
-  width: 56px;
-  z-index: 1100;
+  display: flex;
+  flex: 0 0 auto;
+  height: 54px;
+  justify-content: center;
+  width: 54px;
 }
-.fab.active { background: var(--accent); color: #101507; }
+.fab svg { height: 26px; width: 26px; }
+.fab.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
 #drawer {
   background: var(--panel);
@@ -282,9 +297,23 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
 #member-list li.offline .m-callsign { color: var(--muted); }
 #member-list .m-center { min-height: 36px; padding: 4px 10px; }
 
+/* Marqueur du chef de section */
+.leader-tag {
+  background: var(--accent);
+  border-radius: 3px;
+  color: var(--accent-ink);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin-left: 6px;
+  padding: 1px 5px;
+  vertical-align: middle;
+}
+.tq-tooltip .leader-tag { font-size: 0.58rem; }
+
 /* ----- marqueurs ----- */
 .tq-sym { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)); }
-.tq-sym.is-stale { opacity: 0.55; filter: grayscale(0.7); }
+/* Grisé uniquement tant que le membre n'est pas (re)connecté. */
 .tq-sym.is-disconnected { opacity: 0.45; filter: grayscale(1); }
 .tq-tooltip {
   background: rgba(16, 22, 15, 0.85);
@@ -296,54 +325,85 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
   padding: 1px 6px;
 }
 .tq-tooltip::before { display: none; }
-.tq-tooltip .age { color: var(--warn); font-weight: 400; }
 
-/* ----- outils de tracé / mesure ----- */
-#tools {
+/* ----- outils de tracé / mesure (bas droite, tous visibles) ----- */
+#fab-stack {
+  align-items: flex-end;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  left: 10px;
+  gap: 12px;
   position: absolute;
-  top: calc(95px + env(safe-area-inset-top, 0px)); /* sous le zoom Leaflet */
+  right: 16px;
   z-index: 1100;
 }
-.tool-btn {
-  background: var(--panel);
-  border: 1px solid var(--panel-2);
-  border-radius: 8px;
-  color: var(--text);
-  cursor: pointer;
-  font-size: 1.1rem;
-  height: 44px;
-  width: 44px;
-}
-.tool-btn.active { background: var(--accent); color: #101507; }
-#tool-eni { color: #e05a52; }
-#tool-eni.active { background: #e05a52; color: #fff; }
-.leader-only { display: none; }
-body.is-leader .leader-only { display: block; }
 
-#sketchbar {
+/* Barre de placement d'une mission (choix du point sous le réticule) */
+body.placing #fab-stack { display: none; }
+#mission-placer {
   align-items: center;
   background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  bottom: 24px;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
   display: flex;
-  gap: 10px;
-  left: 50%;
-  max-width: 94vw;
-  padding: 8px 12px;
+  gap: 8px;
+  left: 12px;
+  padding: 8px 10px;
   position: absolute;
-  transform: translateX(-50%);
+  right: 12px;
   z-index: 1300;
 }
-#sketchbar[hidden] { display: none; }
-#sketch-info { font-variant-numeric: tabular-nums; min-width: 70px; }
-#sketchbar .btn { min-height: 40px; padding: 6px 12px; }
+#mission-placer[hidden] { display: none; }
+#placer-info { flex: 1; font-size: 0.82rem; min-width: 0; }
+#mission-placer .btn { min-height: 40px; padding: 6px 12px; white-space: nowrap; }
 
-#sketch-colors { display: flex; gap: 6px; }
+/* Une ligne = un outil ; sa barre contextuelle flotte à gauche du bouton
+   (positionnement absolu : pas de décalage de la pile à l'ouverture). */
+.tool-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  position: relative;
+}
+.tool-fab.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+#tool-eni { color: var(--danger); }
+#tool-eni.active { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+/* Menu contextuel vertical : émerge à gauche du bouton actif (déplacé par JS). */
+#sketchbar {
+  align-items: stretch;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  position: absolute;
+  right: 62px; /* largeur du bouton (54) + écart (8) */
+  top: 50%;
+  transform: translateY(-50%);
+  width: 132px;
+  z-index: 1;
+}
+#sketchbar[hidden] { display: none; }
+#sketch-info {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  padding: 2px 0;
+  text-align: center;
+}
+#sketchbar .btn { min-height: 40px; padding: 6px 12px; width: 100%; }
+.sketch-row { display: flex; gap: 6px; }
+.sketch-row .btn { flex: 1; }
+.btn-icon { align-items: center; display: inline-flex; justify-content: center; padding: 6px; }
+.btn-icon svg { height: 22px; width: 22px; }
+
+#sketch-colors { display: flex; gap: 8px; justify-content: center; padding: 2px 0; }
 #sketch-colors[hidden] { display: none; }
 .color-dot {
   border: 2px solid transparent;
@@ -363,6 +423,153 @@ body.is-leader .leader-only { display: block; }
 .order-popup { display: flex; flex-direction: column; gap: 8px; }
 .order-author { color: var(--muted); font-size: 0.8rem; }
 .order-delete { background: var(--danger); color: #fff; }
+
+/* ----- ordres : bouton, panneau latéral, timeline, marqueurs ----- */
+.orders-toggle {
+  align-items: center;
+  background: rgba(24, 32, 27, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  font-size: 0.9rem;
+  font-weight: 600;
+  gap: 6px;
+  left: 10px;
+  min-height: 40px;
+  padding: 6px 12px;
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  z-index: 1100;
+}
+.orders-toggle svg { height: 20px; width: 20px; }
+#orders-badge {
+  background: var(--danger);
+  border-radius: 9px;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  min-width: 18px;
+  padding: 1px 5px;
+  text-align: center;
+}
+#orders-badge[hidden] { display: none; }
+
+#orders-panel {
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  bottom: 0;
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 14px calc(14px + env(safe-area-inset-bottom, 0px));
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: min(360px, 88vw);
+  z-index: 1500;
+}
+#orders-panel[hidden] { display: none; }
+.panel-head { align-items: center; display: flex; justify-content: space-between; }
+.panel-head h2 { font-size: 1.1rem; margin: 0; }
+
+#orders-composer {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+#orders-composer[hidden] { display: none; }
+.composer-label { color: var(--muted); font-size: 0.78rem; margin: 0; }
+.composer-types { display: grid; gap: 6px; grid-template-columns: 1fr 1fr 1fr; }
+.composer-type {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font-size: 0.72rem;
+  gap: 4px;
+  justify-content: center;
+  line-height: 1.1;
+  min-height: 58px;
+  padding: 7px 4px;
+  text-align: center;
+}
+.composer-type .ct-icon svg { height: 22px; width: 22px; }
+.composer-type.selected { background: var(--panel-2); box-shadow: inset 0 0 0 2px var(--accent); }
+.composer-assignee { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
+.composer-assignee span { color: var(--muted); font-size: 0.85rem; }
+.composer-assignee select {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  flex: 1;
+  font-family: inherit;
+  font-size: 1rem;
+  min-height: 42px;
+  padding: 8px;
+}
+
+.timeline-title { color: var(--muted); font-size: 0.9rem; margin: 4px 0 0; }
+#orders-timeline { display: flex; flex-direction: column; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.orders-empty { color: var(--muted); padding: 8px 0; }
+.mission-item {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--mc);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+}
+.mission-item.removed, .mission-item.status-done { opacity: 0.55; }
+.mi-head { align-items: center; cursor: pointer; display: flex; gap: 8px; }
+.mi-icon svg { height: 22px; width: 22px; }
+.mi-main { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.mi-sub { color: var(--muted); font-size: 0.78rem; }
+.mi-status {
+  background: var(--panel-2);
+  border-radius: 10px;
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.status-ack .mi-status { background: rgba(138, 168, 106, 0.25); color: var(--accent); }
+.status-done .mi-status { background: var(--accent); color: var(--accent-ink); }
+.mi-actions { display: flex; gap: 8px; }
+.mi-actions .btn { flex: 1; min-height: 40px; }
+
+/* Étiquette de mission sur la carte (distincte des liserés) */
+.mission-tip {
+  align-items: center;
+  background: rgba(16, 22, 15, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  display: flex;
+  font-size: 0.74rem;
+  gap: 6px;
+  padding: 3px 7px;
+}
+.mission-tip::before { display: none; }
+.mission-tip .mt-icon svg { display: block; height: 16px; width: 16px; }
+.mission-tip .mt-text b { letter-spacing: 0.04em; }
+.mission-tip .mt-ack { color: var(--accent); }
+.mission-popup .mission-title { align-items: center; display: flex; gap: 6px; }
+.mission-popup .mission-title svg { color: var(--mc); height: 18px; width: 18px; }
 
 /* ----- overlays / toast ----- */
 .overlay[hidden] { display: none; }
@@ -388,6 +595,24 @@ body.is-leader .leader-only { display: block; }
 .overlay-card h2 { margin: 0; font-size: 1.1rem; }
 .overlay-card p { margin: 0; color: var(--muted); line-height: 1.4; }
 
+.diag-card { max-width: 560px; width: 100%; }
+.diag-hint { font-size: 0.78rem; }
+.diag-hint code { background: var(--panel-2); padding: 0 4px; border-radius: 3px; }
+#diag-log {
+  background: var(--panel-2);
+  border-radius: 8px;
+  font-size: 0.66rem;
+  line-height: 1.35;
+  margin: 0;
+  max-height: 50vh;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.diag-actions { display: flex; gap: 8px; }
+.diag-actions .btn { flex: 1; }
+
 #toast {
   align-items: center;
   background: var(--panel-2);
@@ -407,12 +632,19 @@ body.is-leader .leader-only { display: block; }
 
 /* Leaflet : laisser la place à la pastille (en haut à droite) */
 .leaflet-top.leaflet-right { margin-top: calc(50px + env(safe-area-inset-top, 0px)); }
-.leaflet-top.leaflet-left { margin-top: env(safe-area-inset-top, 0px); }
+.leaflet-top.leaflet-left { margin-top: calc(56px + env(safe-area-inset-top, 0px)); }
 /* L'échelle (en bas à gauche) passe au-dessus des coordonnées */
 .leaflet-bottom.leaflet-left { margin-bottom: calc(42px + env(safe-area-inset-bottom, 0px)); }
 
 /* Leaflet : adapter au thème sombre */
-.leaflet-control-attribution { background: rgba(16, 22, 15, 0.7) !important; color: var(--muted) !important; }
+.leaflet-control-attribution {
+  background: rgba(16, 22, 15, 0.6) !important;
+  color: var(--muted) !important;
+  font-size: 9px !important;
+  line-height: 1.3 !important;
+  opacity: 0.7;
+  padding: 0 4px !important;
+}
 .leaflet-control-attribution a { color: var(--accent) !important; }
 .leaflet-control-layers { background: var(--panel) !important; color: var(--text) !important; border: 1px solid var(--panel-2) !important; }
 .leaflet-bar a { background: var(--panel) !important; color: var(--text) !important; border-color: var(--panel-2) !important; }

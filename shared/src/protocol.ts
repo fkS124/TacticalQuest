@@ -46,12 +46,28 @@ export interface GraphicStyle {
   arrow?: boolean;
 }
 
+/** Tâches tactiques transmissibles (ordres rapides). */
+export type MissionType =
+  | 'seize' // S'emparer de
+  | 'support' // Appuyer
+  | 'cover' // Couvrir
+  | 'interdict' // Interdire
+  | 'destroy' // Détruire
+  | 'neutralize' // Neutraliser
+  | 'recon' // Reconnaître
+  | 'screen' // Éclairer
+  | 'hold'; // Tenir
+
 export type OrderPayload =
   | { kind: 'text'; body: string }
   | { kind: 'waypoint'; name: string; lat: number; lng: number; sidc?: string }
   | { kind: 'graphic'; geojson: unknown; style?: GraphicStyle }
   | { kind: 'remove'; orderId: string }
-  | { kind: 'ack'; orderId: string };
+  | { kind: 'ack'; orderId: string }
+  // Ordre de mission assigné à un membre, ancré sur un point de la carte.
+  | { kind: 'mission'; missionType: MissionType; lat: number; lng: number; assignee: string }
+  // Évolution d'état d'une mission (accusé de réception, mission remplie).
+  | { kind: 'mission_status'; missionId: string; status: 'ack' | 'done' };
 
 export interface OrderMessage {
   /** uuid généré côté client (ré-émission idempotente). */

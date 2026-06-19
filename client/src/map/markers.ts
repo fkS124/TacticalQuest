@@ -1,19 +1,11 @@
 import L from 'leaflet';
-import { STALE_AFTER_MS } from '@tq/shared/constants';
 import type { MemberPublic } from '@tq/shared/protocol';
 import { getIcon } from './symbols';
-
-function ageLabel(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `il y a ${s} s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `il y a ${m} min`;
-  return `il y a ${Math.floor(m / 60)} h`;
-}
+import { escapeHtml } from '../util';
 
 interface Tracked {
   marker: L.Marker;
-  /** Clé du dernier style appliqué — évite de re-setIcon à chaque tick. */
+  /** Clé du dernier style appliqué — évite de re-setIcon inutilement. */
   styleKey: string;
   tooltipKey: string;
 }
@@ -29,26 +21,26 @@ export class MarkerLayer {
   ) {}
 
   /** Réconciliation complète avec l'état courant (roster + styles). */
-  sync(members: Map<string, MemberPublic>, now = Date.now()): void {
+  sync(members: Map<string, MemberPublic>): void {
     for (const id of this.tracked.keys()) {
       if (!members.has(id)) this.remove(id);
     }
-    for (const member of members.values()) this.upsert(member, now);
+    for (const member of members.values()) this.upsert(member);
   }
 
-  upsert(member: MemberPublic, now = Date.now()): void {
+  upsert(member: MemberPublic): void {
     const pos = member.lastPosition;
     if (!pos) return; // pas encore de fix : rien à afficher
 
     const isSelf = member.id === this.selfId;
-    const stale = !isSelf && now - Math.max(pos.ts, member.lastSeen) > STALE_AFTER_MS;
-    const styleKey = `${member.sidc}|${stale ? 1 : 0}${member.connected ? 1 : 0}`;
-    const tooltipKey = this.tooltipHtml(member, stale, now);
+    // Seul état visuel : grisé tant que le membre n'est pas (re)connecté.
+    const styleKey = `${member.sidc}|${member.connected ? 1 : 0}`;
+    const tooltipKey = this.tooltipHtml(member);
 
     let t = this.tracked.get(member.id);
     if (!t) {
       const marker = L.marker([pos.lat, pos.lng], {
-        icon: getIcon(member.sidc, { stale, disconnected: !member.connected, self: isSelf }),
+        icon: getIcon(member.sidc, { disconnected: !member.connected, self: isSelf }),
         zIndexOffset: isSelf ? 1000 : 0,
       });
       marker.bindTooltip(tooltipKey, {
@@ -67,7 +59,7 @@ export class MarkerLayer {
     } else {
       t.marker.setLatLng([pos.lat, pos.lng]);
       if (t.styleKey !== styleKey) {
-        t.marker.setIcon(getIcon(member.sidc, { stale, disconnected: !member.connected, self: isSelf }));
+        t.marker.setIcon(getIcon(member.sidc, { disconnected: !member.connected, self: isSelf }));
         t.styleKey = styleKey;
       }
       if (t.tooltipKey !== tooltipKey) {
@@ -93,22 +85,8 @@ export class MarkerLayer {
     this.tracked.delete(memberId);
   }
 
-  /** Tick périodique : réévalue la péremption et les libellés d'âge. */
-  refresh(members: Map<string, MemberPublic>, now = Date.now()): void {
-    for (const member of members.values()) {
-      if (this.tracked.has(member.id)) this.upsert(member, now);
-    }
-  }
-
-  getLatLng(memberId: string): L.LatLng | null {
-    return this.tracked.get(memberId)?.marker.getLatLng() ?? null;
-  }
-
-  private tooltipHtml(member: MemberPublic, stale: boolean, now: number): string {
-    const name = member.callsign + (member.isLeader ? ' ★' : '');
-    if (!stale || !member.lastPosition) return name;
-    const age = ageLabel(now - Math.max(member.lastPosition.ts, member.lastSeen));
-    return `${name}<br><span class="age">${age}</span>`;
+  private tooltipHtml(member: MemberPublic): string {
+    return escapeHtml(member.callsign) + (member.isLeader ? '<span class="leader-tag">CHEF</span>' : '');
   }
 
   private updateAccuracy(lat: number, lng: number, accuracy: number): void {
@@ -116,8 +94,8 @@ export class MarkerLayer {
       this.accuracyCircle = L.circle([lat, lng], {
         radius: accuracy,
         weight: 1,
-        color: '#7da455',
-        fillColor: '#7da455',
+        color: '#8aa86a',
+        fillColor: '#8aa86a',
         fillOpacity: 0.12,
         interactive: false,
       }).addTo(this.map);
