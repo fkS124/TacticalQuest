@@ -3,14 +3,22 @@ import './styles/app.css';
 import { loadSession } from './state';
 import { initHome, showHome } from './views/home';
 import { enterMap, initMapView, toast } from './views/mapView';
+import { shouldShowInstallGate, showInstallGate } from './views/installGate';
 
 initHome();
 initMapView();
 
-// Une session en sessionStorage survit au reload / mise en veille :
-// retour direct sur la carte, le socket fera le rejoin.
-if (loadSession()) enterMap();
-else showHome();
+// Sur mobile dans un navigateur (pas en PWA installée), on masque le site
+// derrière une page d'installation ; sinon on démarre directement.
+if (shouldShowInstallGate()) showInstallGate(startApp);
+else startApp();
+
+function startApp(): void {
+  // Une session en sessionStorage survit au reload / mise en veille :
+  // retour direct sur la carte, le socket fera le rejoin.
+  if (loadSession()) enterMap();
+  else showHome();
+}
 
 registerServiceWorker();
 

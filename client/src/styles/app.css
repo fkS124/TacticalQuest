@@ -423,7 +423,7 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
 }
 .tq-tooltip::before { display: none; }
 
-/* ----- outils de tracé / mesure (bas droite, tous visibles) ----- */
+/* ----- outils de tracé / mesure (bas droite) ----- */
 #fab-stack {
   align-items: flex-end;
   bottom: calc(20px + env(safe-area-inset-bottom, 0px));
@@ -434,25 +434,49 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
   right: 16px;
   z-index: 1100;
 }
-
-/* Barre de placement d'une mission (choix du point sous le réticule) */
-body.placing #fab-stack { display: none; }
-#mission-placer {
-  align-items: center;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+/* Groupe des boutons d'outils ; en portrait, toujours visible (la bascule est
+   masquée). En paysage, il se replie derrière #fab-toggle. */
+#fab-tools {
+  align-items: flex-end;
   display: flex;
-  gap: 8px;
-  left: 12px;
-  padding: 8px 10px;
-  position: absolute;
-  right: 12px;
-  z-index: 1300;
+  flex-direction: column;
+  gap: 12px;
 }
-#mission-placer[hidden] { display: none; }
+#fab-toggle { display: none; }
+#fab-toggle .ft-close { display: none; }
+#fab-toggle svg { height: 24px; width: 24px; }
+
+/* Paysage / faible hauteur : on ne tient pas la colonne d'outils → menu déroulant.
+   Seule la bascule reste visible ; à l'ouverture, les outils s'étalent en ligne
+   vers la gauche (la largeur, elle, ne manque pas) et débordent sur une 2ᵉ rangée
+   au-dessus si besoin. */
+@media (max-height: 600px) {
+  #fab-stack {
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    flex-direction: row;
+    gap: 10px;
+  }
+  #fab-toggle { display: flex; }
+  #fab-tools { display: none; }
+  #fab-stack.open #fab-tools {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap-reverse;
+    gap: 10px;
+    justify-content: flex-end;
+    max-width: calc(100vw - 96px);
+  }
+  #fab-stack.open #fab-toggle .ft-open { display: none; }
+  #fab-stack.open #fab-toggle .ft-close { display: block; }
+  /* La barre contextuelle d'esquisse flotte au-dessus du bouton actif. */
+  #sketchbar {
+    bottom: 64px;
+    left: 50%;
+    right: auto;
+    top: auto;
+    transform: translateX(-50%);
+  }
+}
 
 /* Menu contextuel d'un outil (ligne tracée, point nommé…) : overlay modal. */
 .tool-modal {
@@ -481,6 +505,7 @@ body.placing #fab-stack { display: none; }
 .tool-modal-card h3 { margin: 0; }
 .tool-modal-field { display: flex; flex-direction: column; gap: 6px; }
 .tool-modal-field span { color: var(--muted); font-size: 0.78rem; }
+.composer-label { color: var(--muted); font-size: 0.78rem; margin: 0; }
 .tool-modal-actions { display: flex; gap: 8px; }
 .tool-modal-actions .btn { flex: 1; min-height: 40px; }
 
@@ -509,8 +534,6 @@ body.placing #fab-stack { display: none; }
 /* Palette de couleurs du point nommé (réutilise les pastilles .color-dot). */
 .point-colors { display: flex; gap: 12px; }
 .point-colors .color-dot { height: 28px; width: 28px; }
-#placer-info { flex: 1; font-size: 0.82rem; min-width: 0; }
-#mission-placer .btn { min-height: 40px; padding: 6px 12px; white-space: nowrap; }
 
 /* Une ligne = un outil ; sa barre contextuelle flotte à gauche du bouton
    (positionnement absolu : pas de décalage de la pile à l'ouverture). */
@@ -577,8 +600,8 @@ body.placing #fab-stack { display: none; }
 .order-author { color: var(--muted); font-size: 0.8rem; }
 .order-delete { background: var(--danger); color: #fff; }
 
-/* ----- ordres : bouton, panneau latéral, timeline, marqueurs ----- */
-.orders-toggle {
+/* ----- Comms : bouton, panneau latéral, chat ----- */
+.comms-toggle {
   align-items: center;
   background: rgba(24, 32, 27, 0.92);
   border: 1px solid var(--line);
@@ -597,8 +620,8 @@ body.placing #fab-stack { display: none; }
   top: calc(10px + env(safe-area-inset-top, 0px));
   z-index: 1100;
 }
-.orders-toggle svg { height: 20px; width: 20px; }
-#orders-badge {
+.comms-toggle svg { height: 20px; width: 20px; }
+#comms-badge {
   background: var(--danger);
   border-radius: 9px;
   color: #fff;
@@ -608,9 +631,9 @@ body.placing #fab-stack { display: none; }
   padding: 1px 5px;
   text-align: center;
 }
-#orders-badge[hidden] { display: none; }
+#comms-badge[hidden] { display: none; }
 
-#orders-panel {
+#comms-panel {
   background: var(--panel);
   border-left: 1px solid var(--line);
   bottom: 0;
@@ -618,7 +641,6 @@ body.placing #fab-stack { display: none; }
   display: flex;
   flex-direction: column;
   gap: 10px;
-  overflow-y: auto;
   padding: calc(12px + env(safe-area-inset-top, 0px)) 14px calc(14px + env(safe-area-inset-bottom, 0px));
   position: absolute;
   right: 0;
@@ -626,103 +648,60 @@ body.placing #fab-stack { display: none; }
   width: min(360px, 88vw);
   z-index: 1500;
 }
-#orders-panel[hidden] { display: none; }
+#comms-panel[hidden] { display: none; }
 .panel-head { align-items: center; display: flex; justify-content: space-between; }
 .panel-head h2 { font-size: 1.1rem; margin: 0; }
 
-#orders-composer {
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+/* Fil de discussion : occupe l'espace restant, défile, dernier message en bas. */
+#comms-messages {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-}
-#orders-composer[hidden] { display: none; }
-.composer-label { color: var(--muted); font-size: 0.78rem; margin: 0; }
-.composer-types { display: grid; gap: 6px; grid-template-columns: 1fr 1fr 1fr; }
-.composer-type {
-  align-items: center;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--text);
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  font-size: 0.72rem;
-  gap: 4px;
-  justify-content: center;
-  line-height: 1.1;
-  min-height: 58px;
-  padding: 7px 4px;
-  text-align: center;
-}
-.composer-type .ct-icon svg { height: 22px; width: 22px; }
-.composer-type.selected { background: var(--panel-2); box-shadow: inset 0 0 0 2px var(--accent); }
-.composer-assignee { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
-.composer-assignee span { color: var(--muted); font-size: 0.85rem; }
-.composer-assignee select {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--text);
   flex: 1;
-  font-family: inherit;
-  font-size: 1rem;
-  min-height: 42px;
-  padding: 8px;
-}
-
-.timeline-title { color: var(--muted); font-size: 0.9rem; margin: 4px 0 0; }
-#orders-timeline { display: flex; flex-direction: column; gap: 8px; list-style: none; margin: 0; padding: 0; }
-.orders-empty { color: var(--muted); padding: 8px 0; }
-.mission-item {
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-left: 4px solid var(--mc);
-  border-radius: 8px;
-  display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 8px 10px;
+  list-style: none;
+  margin: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0;
 }
-.mission-item.removed, .mission-item.status-done { opacity: 0.55; }
-.mi-head { align-items: center; cursor: pointer; display: flex; gap: 8px; }
-.mi-icon svg { height: 22px; width: 22px; }
-.mi-main { display: flex; flex: 1; flex-direction: column; min-width: 0; }
-.mi-sub { color: var(--muted); font-size: 0.78rem; }
-.mi-status {
-  background: var(--panel-2);
-  border-radius: 10px;
-  font-size: 0.7rem;
-  padding: 2px 8px;
-  white-space: nowrap;
-}
-.status-ack .mi-status { background: rgba(138, 168, 106, 0.25); color: var(--accent); }
-.status-done .mi-status { background: var(--accent); color: var(--accent-ink); }
-.mi-actions { display: flex; gap: 8px; }
-.mi-actions .btn { flex: 1; min-height: 40px; }
-
-/* Étiquette de mission sur la carte (distincte des liserés) */
-.mission-tip {
-  align-items: center;
-  background: rgba(16, 22, 15, 0.92);
+.comms-empty { color: var(--muted); margin: auto 0; text-align: center; }
+.comms-msg {
+  background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--text);
+  border-radius: 8px;
   display: flex;
-  font-size: 0.74rem;
-  gap: 6px;
-  padding: 3px 7px;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 85%;
+  padding: 6px 9px;
 }
-.mission-tip::before { display: none; }
-.mission-tip .mt-icon svg { display: block; height: 16px; width: 16px; }
-.mission-tip .mt-text b { letter-spacing: 0.04em; }
-.mission-tip .mt-ack { color: var(--accent); }
-.mission-popup .mission-title { align-items: center; display: flex; gap: 6px; }
-.mission-popup .mission-title svg { color: var(--mc); height: 18px; width: 18px; }
+/* Mes messages : alignés à droite, teinte accent. */
+.comms-msg.mine {
+  align-self: flex-end;
+  background: var(--panel-2);
+  border-color: var(--accent);
+}
+.cm-head { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
+.cm-head b { font-size: 0.82rem; }
+.cm-time { color: var(--muted); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
+.cm-body { line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap; }
+
+/* Composer : champ de saisie + bouton envoyer. */
+.comms-composer { align-items: stretch; display: flex; gap: 8px; }
+.comms-composer input {
+  flex: 1;
+  font-size: 1rem;
+  min-width: 0;
+}
+.comms-composer .btn {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  min-height: 48px;
+  padding: 8px 14px;
+}
+.comms-composer .btn svg { height: 22px; width: 22px; }
 
 /* ----- overlays / toast ----- */
 .overlay[hidden] { display: none; }
@@ -801,3 +780,76 @@ body.placing #fab-stack { display: none; }
 .leaflet-control-attribution a { color: var(--accent) !important; }
 .leaflet-control-layers { background: var(--panel) !important; color: var(--text) !important; border: 1px solid var(--panel-2) !important; }
 .leaflet-bar a { background: var(--panel) !important; color: var(--text) !important; border-color: var(--panel-2) !important; }
+
+/* ----- page d'installation (mobile, navigateur) ----- */
+/* Masque tout le site tant qu'elle est affichée. */
+body.install-locked { overflow: hidden; }
+body.install-locked #home,
+body.install-locked #map-screen { display: none !important; }
+
+#install-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  padding-top: calc(24px + env(safe-area-inset-top, 0px));
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+}
+
+.install-card {
+  max-width: 420px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+}
+
+.install-logo {
+  border-radius: 16px;
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.install-card h1 { margin: 0; font-size: 1.5rem; letter-spacing: 0.04em; }
+.install-lead { margin: 0; color: var(--muted); line-height: 1.5; }
+
+.install-steps {
+  margin: 4px 0 0;
+  padding-left: 22px;
+  text-align: left;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  line-height: 1.5;
+}
+.install-steps b { color: var(--text); }
+
+.install-glyph {
+  display: inline-flex;
+  vertical-align: -5px;
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+}
+.install-glyph svg { width: 100%; height: 100%; }
+
+.install-skip {
+  margin-top: 8px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 8px 12px;
+}
+.install-skip:active { color: var(--text); }

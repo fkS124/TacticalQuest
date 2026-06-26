@@ -12,23 +12,16 @@ import { dlog, formatLog, clearLog, onLog } from '../debugLog';
 import { createBaseLayers, DEFAULT_LAYER } from '../map/layers';
 import { MarkerLayer } from '../map/markers';
 import { OrdersLayer } from '../map/orders';
-import { MissionLayer } from '../map/missionLayer';
 import { PolylineSketch } from '../map/sketch';
 import { HOSTILE_SIDC, symbolSvg } from '../map/symbols';
-import type { MissionType } from '@tq/shared/protocol';
-import { MISSION_DEFS, type MissionView } from '../orders/missions';
 import {
-  checkIncomingMissions,
-  closeOrders,
-  initOrdersPanel,
-  missionAck,
-  missionCancel,
-  missionDone,
-  pendingMissionCountForSelf,
-  renderOrdersPanel,
-  resetMissionNotifications,
-  submitMission,
-} from './ordersPanel';
+  checkIncomingMessages,
+  closeComms,
+  initCommsPanel,
+  renderComms,
+  resetCommsNotifications,
+  unreadCommsCount,
+} from './commsPanel';
 import { escapeHtml, formatDistance, uid } from '../util';
 import { showHome } from './home';
 
@@ -37,7 +30,6 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 let map: L.Map | null = null;
 let markers: MarkerLayer | null = null;
 let ordersLayer: OrdersLayer | null = null;
-let missionLayer: MissionLayer | null = null;
 let geo: GeoWatcher | null = null;
 let drawerTimer: ReturnType<typeof setInterval> | null = null;
 let follow = true;
@@ -85,10 +77,9 @@ export function enterMap(): void {
   // Réaffiche d'éventuels ordres composés hors-ligne avant la reconnexion.
   restorePendingOrders();
   ordersLayer?.sync(state.orders);
-  missionLayer?.sync(state.orders);
   renderTopbar();
   renderDrawer();
-  renderOrdersPanel();
+  renderComms();
   updateReadout();
 
   if (!busWired) {
@@ -150,11 +141,9 @@ function applyHeading(heading: number): void {
 function exitToHome(message?: string): void {
   stopCompass();
   cancelSketch();
-  cancelMissionPlacement();
-  closeOrders();
-  resetMissionNotifications();
+  closeComms();
+  resetCommsNotifications();
   ordersLayer?.clear();
-  missionLayer?.clear();
   geo?.stop();
   geo = null;
   if (drawerTimer) {
@@ -189,10 +178,10 @@ function initLeaflet(): void {
   // Le mode suivi se coupe dès que l'utilisateur déplace la carte.
   map.on('dragstart', () => setFollow(false));
   map.on('move', updateReadout);
-  // Un appui sur la carte referme tiroir et panneau d'ordres ouverts.
+  // Un appui sur la carte referme tiroir et panneau Comms ouverts.
   map.on('click', () => {
     if (!$('drawer').hidden) $('drawer').hidden = true;
-    if (!$('orders-panel').hidden) closeOrders();
+    if (!$('comms-panel').hidden) closeComms();
   });
   // Rotation/redimensionnement (PWA, clavier, barre d'adresse) : resync taille.
   window.addEventListener('resize', () => map?.invalidateSize());
@@ -209,16 +198,6 @@ function initLeaflet(): void {
     authorName: callsignOf,
     isSketching: () => sketch !== null,
   });
-
-  missionLayer = new MissionLayer(map, {
-    callsign: callsignOf,
-    selfId: () => state.session?.memberId ?? '',
-    canCancel: (m) => state.session?.isLeader === true || m.authorId === state.session?.memberId,
-    onAck: (id) => missionAck(id),
-    onDone: (id) => missionDone(id),
-    onCancel: (id) => missionCancel(id),
-    isSketching: () => sketch !== null,
-  });
 }
 
 function wireBus(): void {
@@ -227,7 +206,6 @@ function wireBus(): void {
     markers.sync(state.members);
     renderTopbar();
     renderDrawer();
-    renderOrdersPanel(); // indicatifs / liste d'assignation
   });
 
   bus.on('position', (memberId) => {
@@ -237,10 +215,9 @@ function wireBus(): void {
 
   bus.on('orders', () => {
     ordersLayer?.sync(state.orders);
-    missionLayer?.sync(state.orders);
-    renderOrdersPanel();
-    checkIncomingMissions(); // toast + vibration sur ordre reçu
-    renderTopbar(); // badges (éléments en attente + ordres)
+    renderComms();
+    checkIncomingMessages(); // toast + vibration sur message reçu
+    renderTopbar(); // badges (éléments en attente + non-lus Comms)
   });
 
   bus.on('conn', () => renderConn());
@@ -536,51 +513,12 @@ function closeEniMenu(): void {
   pendingEni = null;
 }
 
-// --- placement du point d'une mission ---
-// Une mission = un lieu + une action : après le choix de l'action dans le
-// panneau, on choisit le point en déplaçant la carte sous le réticule.
-
-let placing: { type: MissionType; assignee: string } | null = null;
-
-function beginMissionPlacement(type: MissionType, assignee: string): void {
-  if (!map) return;
-  cancelSketch();
-  closeOrders();
-  setFollow(false);
-  placing = { type, assignee };
-  document.body.classList.add('placing');
-  $('mission-placer').hidden = false;
-  updatePlacerInfo();
-}
-
-function updatePlacerInfo(): void {
-  if (!placing || !map) return;
-  const c = map.getCenter();
-  $('placer-info').textContent = `${MISSION_DEFS[placing.type].label} → ${formatCoords(c.lat, c.lng)}`;
-}
-
-function confirmMissionPlacement(): void {
-  if (!placing || !map) return;
-  const c = map.getCenter();
-  const def = MISSION_DEFS[placing.type];
-  submitMission(placing.type, placing.assignee, c.lat, c.lng);
-  toast(`Ordre « ${def.short} » transmis.`);
-  cancelMissionPlacement();
-}
-
-function cancelMissionPlacement(): void {
-  placing = null;
-  document.body.classList.remove('placing');
-  $('mission-placer').hidden = true;
-}
-
 // --- coordonnées (réticule central + popups) ---
 
 function updateReadout(): void {
   if (!map) return;
   const c = map.getCenter();
   $('coord-readout').textContent = formatCoords(c.lat, c.lng);
-  if (placing) updatePlacerInfo();
 }
 
 // --- aller à des coordonnées saisies (MGRS ou lat/lng) ---
@@ -651,19 +589,13 @@ function renderTopbar(): void {
   badge.textContent = pending > 0 ? `↑${pending}` : '';
   badge.title = pending > 0 ? `${pending} élément(s) à synchroniser` : '';
 
-  // Badge du bouton « Ordres » : missions actives qui me sont assignées.
-  const myMissions = pendingMissionCountForSelf();
-  const ob = $('orders-badge');
-  ob.hidden = myMissions === 0;
-  ob.textContent = String(myMissions);
+  // Badge du bouton « Comms » : messages reçus non lus.
+  const unread = unreadCommsCount();
+  const cb = $('comms-badge');
+  cb.hidden = unread === 0;
+  cb.textContent = String(unread);
 
   renderConn();
-}
-
-/** Centre la carte sur une mission (depuis la timeline). */
-function focusMission(m: MissionView): void {
-  setFollow(false);
-  map?.setView([m.lat, m.lng], Math.max(map.getZoom(), 15));
 }
 
 function renderDrawer(): void {
@@ -713,14 +645,8 @@ function ago(ms: number, fresh = ''): string {
 }
 
 export function initMapView(): void {
-  // Panneau latéral des ordres (composer + timeline).
-  initOrdersPanel({
-    beginPlacement: beginMissionPlacement,
-    focusMission,
-    notify: (text) => toast(text),
-  });
-  $('placer-ok').addEventListener('click', confirmMissionPlacement);
-  $('placer-cancel').addEventListener('click', cancelMissionPlacement);
+  // Panneau latéral « Comms » (chat libre de la salle).
+  initCommsPanel({ notify: (text) => toast(text) });
 
   for (const mode of DISPLAYED_TOOLS) {
     $(`tool-${mode}`).addEventListener('click', () => {
@@ -730,6 +656,11 @@ export function initMapView(): void {
     });
   }
   $('tool-eni').addEventListener('click', () => beginEni());
+  // Bascule du menu d'outils (paysage / faible hauteur).
+  $('fab-toggle').addEventListener('click', () => {
+    const open = $('fab-stack').classList.toggle('open');
+    $('fab-toggle').setAttribute('aria-expanded', String(open));
+  });
   $('eni-ok').addEventListener('click', confirmEniMenu);
   $('eni-cancel').addEventListener('click', closeEniMenu);
   $('tool-compass').addEventListener('click', () => void toggleCompass());

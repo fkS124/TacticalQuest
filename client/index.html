@@ -57,28 +57,25 @@
       </span>
     </div>
 
-    <button id="btn-orders" class="orders-toggle" title="Ordres">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18"/><path d="M5 4h11l-1.5 3L16 10H5"/></svg>
-      <span>Ordres</span>
-      <span id="orders-badge" hidden></span>
+    <button id="btn-comms" class="comms-toggle" title="Comms">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 3.5z"/></svg>
+      <span>Comms</span>
+      <span id="comms-badge" hidden></span>
     </button>
 
-    <aside id="orders-panel" hidden>
+    <aside id="comms-panel" hidden>
       <header class="panel-head">
-        <h2>Ordres</h2>
-        <button id="orders-close" class="topbar-btn">Fermer</button>
+        <h2>Comms</h2>
+        <button id="comms-close" class="topbar-btn">Fermer</button>
       </header>
-      <div id="orders-composer" hidden>
-        <p class="composer-label">Nouvel ordre — cible : centre de la carte (réticule)</p>
-        <div class="composer-types" id="composer-types"></div>
-        <label class="composer-assignee">
-          <span>Assigné à</span>
-          <select id="composer-assignee"></select>
-        </label>
-        <button id="composer-send" class="btn btn-primary">Transmettre l'ordre</button>
+      <ul id="comms-messages"></ul>
+      <div class="comms-composer">
+        <input id="comms-input" type="text" maxlength="500" autocomplete="off"
+               placeholder="Message…" enterkeyhint="send" />
+        <button id="comms-send" class="btn btn-primary" title="Envoyer" aria-label="Envoyer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12 20 4l-6 16-3-7z"/></svg>
+        </button>
       </div>
-      <h3 class="timeline-title">Timeline</h3>
-      <ul id="orders-timeline"></ul>
     </aside>
 
     <div id="crosshair" aria-hidden="true"></div>
@@ -103,13 +100,6 @@
           <button id="coord-search-ok" class="btn btn-primary">Y aller</button>
         </div>
       </div>
-    </div>
-
-    <!-- Placement du point d'une mission : déplacer la carte puis valider -->
-    <div id="mission-placer" hidden>
-      <span id="placer-info"></span>
-      <button id="placer-cancel" class="btn">Annuler</button>
-      <button id="placer-ok" class="btn btn-primary">Valider la cible</button>
     </div>
 
     <!-- Menu contextuel d'esquisse : panneau vertical déplacé à gauche de l'outil actif -->
@@ -206,8 +196,10 @@
       </div>
     </div>
 
-    <!-- Outils de dessin/mesure : bas droite, tous visibles -->
+    <!-- Outils de dessin/mesure : bas droite. En paysage (peu de hauteur) le
+         groupe #fab-tools se replie derrière le bouton bascule #fab-toggle. -->
     <div id="fab-stack">
+      <div id="fab-tools">
       <div class="tool-row">
         <button id="tool-compass" class="fab tool-fab" title="Orienter la carte selon la boussole (cap en haut)" aria-label="Boussole">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5 13 13l-4.5 2.5L11 11Z" fill="currentColor" stroke="none"/></svg>
@@ -242,6 +234,12 @@
       </div>
       <button id="btn-locate" class="fab" title="Centrer sur moi" aria-label="Centrer sur moi">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="6"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg>
+      </button>
+      </div>
+      <!-- Bascule du menu d'outils : affiché seulement quand la hauteur manque. -->
+      <button id="fab-toggle" class="fab" title="Outils" aria-label="Outils" aria-expanded="false">
+        <svg class="ft-open" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+        <svg class="ft-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
       </button>
     </div>
 
