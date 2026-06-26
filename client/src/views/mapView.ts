@@ -1,8 +1,11 @@
 import L from 'leaflet';
+import '../map/rotate'; // expose `L` au global (doit précéder leaflet-rotate)
+import 'leaflet-rotate'; // patche L.Map avec setBearing()
+import { startCompass, type CompassStop } from '../map/compass';
 import { POSITION_INTERVAL_MS } from '@tq/shared/constants';
-import type { MemberPublic, Position } from '@tq/shared/protocol';
+import type { GraphicStyle, LineEchelon, MemberPublic, Position } from '@tq/shared/protocol';
 import { bus, state } from '../state';
-import { cycleCoordFormat, formatCoords, getCoordFormat, setCoordFormat, type CoordFormat } from '../coords';
+import { cycleCoordFormat, formatCoords, getCoordFormat, parseCoords, setCoordFormat, type CoordFormat } from '../coords';
 import { connectForSession, leaveRoom, pendingOrderCount, restorePendingOrders, sendOrder, sendPosition } from '../socket';
 import { startGeolocation, type GeoWatcher } from '../geo';
 import { dlog, formatLog, clearLog, onLog } from '../debugLog';
@@ -40,11 +43,27 @@ let drawerTimer: ReturnType<typeof setInterval> | null = null;
 let follow = true;
 let hasCentered = false;
 let busWired = false;
+// Boussole : si actif, fonction d'arrêt de l'écoute ; bearing courant appliqué.
+let compassStop: CompassStop | null = null;
+let compassBearing = 0;
 
-type SketchMode = 'measure' | 'line' | 'arrow';
+// 'arrow' reste un mode valide (retiré de l'affichage, voir index.html) ;
+// les outils réellement présentés sont listés dans DISPLAYED_TOOLS.
+type SketchMode = 'measure' | 'line' | 'arrow' | 'polygon';
+const DISPLAYED_TOOLS = ['measure', 'line', 'polygon'] as const;
 let sketch: PolylineSketch | null = null;
 let sketchMode: SketchMode = 'measure';
 let sketchColor = '#e8d44d';
+// Tracé d'un liseré figé, en attente de finalisation par le menu contextuel.
+let pendingLine: L.LatLng[] | null = null;
+let pendingEchelon: LineEchelon | '' = '';
+// Box (polygone) figée, en attente de nom.
+let pendingBox: L.LatLng[] | null = null;
+// Point nommé (rond de couleur) en attente de nom/couleur.
+let pendingPoint: L.LatLng | null = null;
+let pointColor = '#e8d44d';
+// Plot ENI (losange rouge) en attente de texte.
+let pendingEni: L.LatLng | null = null;
 
 export function enterMap(): void {
   const session = state.session;
@@ -88,7 +107,48 @@ export function enterMap(): void {
   drawerTimer ??= setInterval(renderDrawer, POSITION_INTERVAL_MS);
 }
 
+// --- boussole : carte « cap en haut » (mobile) ---
+
+async function toggleCompass(): Promise<void> {
+  if (compassStop) {
+    stopCompass();
+    return;
+  }
+  if (!map || typeof map.setBearing !== 'function') {
+    toast('Rotation de carte non supportée sur cet appareil.');
+    return;
+  }
+  const stop = await startCompass(applyHeading);
+  if (!stop) {
+    toast('Boussole indisponible sur cet appareil.');
+    return;
+  }
+  compassStop = stop;
+  $('tool-compass').classList.add('active');
+  setFollow(true); // cap en haut : on recadre sur la position
+}
+
+function stopCompass(): void {
+  compassStop?.();
+  compassStop = null;
+  $('tool-compass').classList.remove('active');
+  compassBearing = 0;
+  map?.setBearing(0);
+}
+
+/** Cap boussole → rotation carte (cap en haut). Seuil pour éviter de tourner à
+ *  la cadence du capteur (~60 Hz) ; on ignore les variations < 1,5°. */
+function applyHeading(heading: number): void {
+  if (!map || !compassStop) return;
+  const target = -heading;
+  const delta = (((target - compassBearing) % 360) + 540) % 360 - 180;
+  if (Math.abs(delta) < 1.5) return;
+  compassBearing = target;
+  map.setBearing(target);
+}
+
 function exitToHome(message?: string): void {
+  stopCompass();
   cancelSketch();
   cancelMissionPlacement();
   closeOrders();
@@ -114,6 +174,10 @@ function initLeaflet(): void {
     zoom: 6,
     zoomControl: true,
     attributionControl: false,
+    rotate: true, // active la rotation (boussole) ; bearing 0 = nord en haut
+    rotateControl: false, // on fournit notre propre bouton
+    touchRotate: false,
+    shiftKeyRotate: false,
   });
   // Attribution des données (légalement requise) mais sans le préfixe « Leaflet ».
   L.control.attribution({ prefix: false }).addTo(map);
@@ -237,7 +301,7 @@ function setFollow(v: boolean): void {
 // --- mesure et tracés (liserés / flèches) ---
 
 function setActiveTool(mode: SketchMode | null): void {
-  for (const m of ['measure', 'line', 'arrow'] as const) {
+  for (const m of DISPLAYED_TOOLS) {
     $(`tool-${m}`).classList.toggle('active', m === mode);
   }
 }
@@ -278,18 +342,39 @@ function cancelSketch(): void {
 function finishSketch(): void {
   if (!sketch) return;
   const mode = sketchMode;
+  if (mode === 'measure') {
+    cancelSketch(); // la mesure est purement locale
+    return;
+  }
   // « OK » prend la position courante du réticule comme dernier sommet.
-  const points = mode === 'measure' ? [] : sketch.getFinalPoints();
-  cancelSketch();
-
-  if (mode === 'measure') return; // la mesure est purement locale
+  const points = sketch.getFinalPoints();
   if (points.length < 2) {
     toast('Déplacez la carte pour tracer.');
     return;
   }
+  if (mode === 'arrow') {
+    cancelSketch();
+    sendGraphic(points, { color: sketchColor, weight: 4, arrow: true });
+    return;
+  }
+  if (mode === 'polygon') {
+    if (points.length < 3) {
+      toast('Posez au moins 3 sommets pour une box.');
+      return;
+    }
+    freezeAndHideSketchbar();
+    openBoxMenu(points);
+    return;
+  }
+  // Liseré : on fige le tracé (il reste visible) et on ouvre le menu de
+  // finalisation (nom + figuré d'échelon) ; rien n'est transmis avant Valider.
+  freezeAndHideSketchbar();
+  openLineMenu(points);
+}
 
-  // Optimiste : l'ordre s'affiche tout de suite et se synchronise dès que
-  // la liaison est rétablie (voir sendOrder / file d'attente).
+/** Transmet un ordre graphique (optimiste : affiché tout de suite, file d'attente
+ *  vidée à la (re)connexion — voir sendOrder). */
+function sendGraphic(points: L.LatLng[], style: GraphicStyle): void {
   sendOrder({
     id: uid(),
     authorId: state.session!.memberId,
@@ -300,14 +385,112 @@ function finishSketch(): void {
       geojson: {
         type: 'Feature',
         properties: {},
-        geometry: {
-          type: 'LineString',
-          coordinates: points.map((p) => [p.lng, p.lat]),
-        },
+        geometry: { type: 'LineString', coordinates: points.map((p) => [p.lng, p.lat]) },
       },
-      style: { color: sketchColor, weight: 4, arrow: mode === 'arrow' },
+      style,
     },
   });
+}
+
+function openLineMenu(points: L.LatLng[]): void {
+  pendingLine = points;
+  pendingEchelon = '';
+  const input = $<HTMLInputElement>('line-name');
+  input.value = '';
+  selectEchelon('');
+  $('line-menu').hidden = false;
+  input.focus();
+}
+
+/** Met en évidence le figuré choisi (et mémorise la sélection). */
+function selectEchelon(echelon: LineEchelon | ''): void {
+  pendingEchelon = echelon;
+  document.querySelectorAll<HTMLButtonElement>('.line-ech').forEach((btn) => {
+    btn.classList.toggle('selected', (btn.dataset.echelon ?? '') === echelon);
+  });
+}
+
+function confirmLineMenu(): void {
+  if (!pendingLine) return;
+  const style: GraphicStyle = { color: sketchColor, weight: 4 };
+  const name = $<HTMLInputElement>('line-name').value.trim();
+  if (name) style.label = name;
+  if (pendingEchelon) style.echelon = pendingEchelon;
+  sendGraphic(pendingLine, style);
+  closeLineMenu();
+}
+
+/** Fige le tracé en cours (il reste visible) et range la barre d'esquisse. */
+function freezeAndHideSketchbar(): void {
+  sketch?.freeze();
+  $('sketchbar').hidden = true;
+  setActiveTool(null);
+}
+
+/** Ferme le menu et détruit le tracé figé (qu'il ait été transmis ou non). */
+function closeLineMenu(): void {
+  $('line-menu').hidden = true;
+  pendingLine = null;
+  cancelSketch();
+}
+
+// --- box (polygone semi-transparent + nom au centre) ---
+// Réutilise le système de lignes : on dessine les sommets au réticule, puis un
+// menu contextuel demande le nom. La couleur vient du sketchbar (comme les lignes).
+
+function openBoxMenu(points: L.LatLng[]): void {
+  pendingBox = points;
+  const input = $<HTMLInputElement>('box-name');
+  input.value = '';
+  $('box-menu').hidden = false;
+  input.focus();
+}
+
+function confirmBoxMenu(): void {
+  if (!pendingBox) return;
+  const name = $<HTMLInputElement>('box-name').value.trim();
+  const style: GraphicStyle = { color: sketchColor, weight: 3, polygon: true };
+  if (name) style.label = name;
+  sendGraphic(pendingBox, style);
+  closeBoxMenu();
+}
+
+function closeBoxMenu(): void {
+  $('box-menu').hidden = true;
+  pendingBox = null;
+  cancelSketch();
+}
+
+// --- point nommé (rond de couleur + texte, accessible à tous) ---
+// Tap sur l'outil = capture du point sous le réticule, puis menu nom + couleur.
+
+function beginPoint(): void {
+  if (!map || !state.session) return;
+  cancelSketch();
+  pendingPoint = map.getCenter();
+  const input = $<HTMLInputElement>('point-name');
+  input.value = '';
+  $('point-menu').hidden = false;
+  input.focus();
+}
+
+function confirmPointMenu(): void {
+  if (!pendingPoint || !state.session) return;
+  const name = $<HTMLInputElement>('point-name').value.trim() || 'Point';
+  const c = pendingPoint;
+  sendOrder({
+    id: uid(),
+    authorId: state.session.memberId,
+    ts: Date.now(),
+    kind: 'waypoint',
+    payload: { kind: 'waypoint', name, lat: c.lat, lng: c.lng, color: pointColor },
+  });
+  closePointMenu();
+}
+
+function closePointMenu(): void {
+  $('point-menu').hidden = true;
+  pendingPoint = null;
 }
 
 function deleteOrder(orderId: string): void {
@@ -321,19 +504,36 @@ function deleteOrder(orderId: string): void {
 }
 
 // --- plot ennemi (losange rouge, accessible à tous) ---
-// Un tap sur l'outil = plot immédiat sous le réticule.
+// Tap sur l'outil = capture du réticule, puis menu texte (réutilise le système
+// du point nommé) ; le texte devient la désignation affichée près du losange.
 
-function plotEniAtCenter(): void {
+function beginEni(): void {
   if (!map || !state.session) return;
   cancelSketch(); // un plot ENI interrompt une éventuelle esquisse en cours
-  const c = map.getCenter();
+  pendingEni = map.getCenter();
+  const input = $<HTMLInputElement>('eni-name');
+  input.value = '';
+  $('eni-menu').hidden = false;
+  input.focus();
+}
+
+function confirmEniMenu(): void {
+  if (!pendingEni || !state.session) return;
+  const name = $<HTMLInputElement>('eni-name').value.trim() || 'ENI';
+  const c = pendingEni;
   sendOrder({
     id: uid(),
     authorId: state.session.memberId,
     ts: Date.now(),
     kind: 'waypoint',
-    payload: { kind: 'waypoint', name: 'ENI', lat: c.lat, lng: c.lng, sidc: HOSTILE_SIDC },
+    payload: { kind: 'waypoint', name, lat: c.lat, lng: c.lng, sidc: HOSTILE_SIDC },
   });
+  closeEniMenu();
+}
+
+function closeEniMenu(): void {
+  $('eni-menu').hidden = true;
+  pendingEni = null;
 }
 
 // --- placement du point d'une mission ---
@@ -383,6 +583,32 @@ function updateReadout(): void {
   if (placing) updatePlacerInfo();
 }
 
+// --- aller à des coordonnées saisies (MGRS ou lat/lng) ---
+
+function openCoordSearch(): void {
+  const input = $<HTMLInputElement>('coord-search-input');
+  input.value = '';
+  $('coord-search-error').hidden = true;
+  $('coord-search-menu').hidden = false;
+  input.focus();
+}
+
+function confirmCoordSearch(): void {
+  if (!map) return;
+  const parsed = parseCoords($<HTMLInputElement>('coord-search-input').value);
+  if (!parsed) {
+    $('coord-search-error').hidden = false;
+    return;
+  }
+  setFollow(false); // on va à un point précis : plus de recadrage auto
+  map.setView([parsed.lat, parsed.lng], Math.max(map.getZoom(), 15));
+  $('coord-search-menu').hidden = true;
+}
+
+function closeCoordSearch(): void {
+  $('coord-search-menu').hidden = true;
+}
+
 function renderCoordFormat(): void {
   const fmt = getCoordFormat();
   document.querySelectorAll<HTMLButtonElement>('#coord-format button').forEach((btn) => {
@@ -417,7 +643,8 @@ const LEADER_TAG = (isLeader: boolean): string =>
   isLeader ? '<span class="leader-tag">CHEF</span>' : '';
 
 function renderTopbar(): void {
-  $('member-count').textContent = String(state.members.size);
+  const connected = [...state.members.values()].filter((m) => m.connected).length;
+  $('member-count').textContent = String(connected);
   const pending = pendingOrderCount();
   const badge = $('pending-badge');
   badge.hidden = pending === 0;
@@ -472,10 +699,15 @@ function renderDrawer(): void {
 }
 
 function memberMeta(m: MemberPublic, now: number): string {
-  if (!m.connected) return 'déconnecté';
+  if (!m.connected) return ago(now - m.lastSeen);
   if (!m.lastPosition) return 'pas de position';
-  const s = Math.floor((now - Math.max(m.lastPosition.ts, m.lastSeen)) / 1000);
-  if (s < 15) return 'à jour';
+  return ago(now - Math.max(m.lastPosition.ts, m.lastSeen), 'à jour');
+}
+
+/** « il y a X s / min ». En deçà de `fresh` secondes, renvoie le libellé frais. */
+function ago(ms: number, fresh = ''): string {
+  const s = Math.floor(ms / 1000);
+  if (fresh && s < 15) return fresh;
   if (s < 60) return `il y a ${s} s`;
   return `il y a ${Math.floor(s / 60)} min`;
 }
@@ -490,15 +722,26 @@ export function initMapView(): void {
   $('placer-ok').addEventListener('click', confirmMissionPlacement);
   $('placer-cancel').addEventListener('click', cancelMissionPlacement);
 
-  for (const mode of ['measure', 'line', 'arrow'] as const) {
+  for (const mode of DISPLAYED_TOOLS) {
     $(`tool-${mode}`).addEventListener('click', () => {
       // Re-choisir l'outil actif annule l'esquisse en cours.
       if (sketch && sketchMode === mode) cancelSketch();
       else startSketch(mode);
     });
   }
-  $('tool-eni').addEventListener('click', () => plotEniAtCenter());
+  $('tool-eni').addEventListener('click', () => beginEni());
+  $('eni-ok').addEventListener('click', confirmEniMenu);
+  $('eni-cancel').addEventListener('click', closeEniMenu);
+  $('tool-compass').addEventListener('click', () => void toggleCompass());
   $('sketch-add').addEventListener('click', () => sketch?.addVertexAtCenter());
+
+  // Recherche de coordonnées (loupe) : saisie MGRS / lat-lng puis « Y aller ».
+  $('coord-search').addEventListener('click', openCoordSearch);
+  $('coord-search-ok').addEventListener('click', confirmCoordSearch);
+  $('coord-search-cancel').addEventListener('click', closeCoordSearch);
+  $<HTMLInputElement>('coord-search-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') confirmCoordSearch();
+  });
 
   // Format de coordonnées : tap sur l'affichage = cycle, tiroir = choix direct.
   $('coord-readout').addEventListener('click', cycleCoordFormat);
@@ -544,11 +787,32 @@ export function initMapView(): void {
   $('sketch-ok').addEventListener('click', () => void finishSketch());
   $('sketch-cancel').addEventListener('click', cancelSketch);
   $('sketch-undo').addEventListener('click', () => sketch?.undo());
-  document.querySelectorAll<HTMLButtonElement>('.color-dot').forEach((dot, i) => {
+
+  // Menu contextuel du liseré : choix du figuré d'échelon + valider / annuler.
+  document.querySelectorAll<HTMLButtonElement>('.line-ech').forEach((btn) => {
+    btn.addEventListener('click', () => selectEchelon((btn.dataset.echelon ?? '') as LineEchelon | ''));
+  });
+  $('line-ok').addEventListener('click', confirmLineMenu);
+  $('line-cancel').addEventListener('click', closeLineMenu);
+  $('box-ok').addEventListener('click', confirmBoxMenu);
+  $('box-cancel').addEventListener('click', closeBoxMenu);
+
+  // Outil point nommé + son menu (nom + couleur du rond).
+  $('tool-point').addEventListener('click', () => beginPoint());
+  document.querySelectorAll<HTMLButtonElement>('#point-colors .color-dot').forEach((dot) => {
+    dot.addEventListener('click', () => {
+      pointColor = dot.dataset.color!;
+      document.querySelectorAll('#point-colors .color-dot').forEach((el) => el.classList.remove('selected'));
+      dot.classList.add('selected');
+    });
+  });
+  $('point-ok').addEventListener('click', confirmPointMenu);
+  $('point-cancel').addEventListener('click', closePointMenu);
+  document.querySelectorAll<HTMLButtonElement>('#sketch-colors .color-dot').forEach((dot, i) => {
     if (i === 0) dot.classList.add('selected');
     dot.addEventListener('click', () => {
       sketchColor = dot.dataset.color!;
-      document.querySelectorAll('.color-dot').forEach((el) => el.classList.remove('selected'));
+      document.querySelectorAll('#sketch-colors .color-dot').forEach((el) => el.classList.remove('selected'));
       dot.classList.add('selected');
       sketch?.setColor(sketchColor);
     });

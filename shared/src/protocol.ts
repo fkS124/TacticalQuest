@@ -38,12 +38,24 @@ export interface RoomState {
 // Un nouveau `kind` est un changement client uniquement.
 // ---------------------------------------------------------------------------
 
+/**
+ * Figuré d'échelon APP-6 posé au centre d'une limite inter-unités :
+ * trois points = section, une barre = compagnie, deux barres = bataillon.
+ */
+export type LineEchelon = 'section' | 'company' | 'battalion';
+
 export interface GraphicStyle {
   color?: string;
   weight?: number;
   dashArray?: string;
   /** Pointe de flèche en bout de ligne (axe d'effort, direction). */
   arrow?: boolean;
+  /** Nom affiché à un bout de la ligne (limite / sous-secteur). */
+  label?: string;
+  /** Figuré d'échelon dessiné au centre de la ligne (limite inter-unités). */
+  echelon?: LineEchelon;
+  /** Polygone fermé semi-transparent (box / zone) ; le nom se pose au centre. */
+  polygon?: boolean;
 }
 
 /** Tâches tactiques transmissibles (ordres rapides). */
@@ -60,7 +72,9 @@ export type MissionType =
 
 export type OrderPayload =
   | { kind: 'text'; body: string }
-  | { kind: 'waypoint'; name: string; lat: number; lng: number; sidc?: string }
+  // `sidc` → symbole milsymbol (plot ENI) ; `color` → rond de couleur + nom
+  // (point nommé). Les deux s'excluent : `color` prime au rendu.
+  | { kind: 'waypoint'; name: string; lat: number; lng: number; sidc?: string; color?: string }
   | { kind: 'graphic'; geojson: unknown; style?: GraphicStyle }
   | { kind: 'remove'; orderId: string }
   | { kind: 'ack'; orderId: string }

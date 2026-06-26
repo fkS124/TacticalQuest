@@ -6,14 +6,14 @@ import {
   ROOM_EMPTY_TTL_MS,
   ROOM_MAX_AGE_MS,
 } from '@tq/shared/constants';
-import { RoomManager } from './rooms';
+import { isErr, RoomManager } from './rooms';
 
 const SIDC = 'SFGPUCI----';
 const T0 = 1_000_000;
 
 function createdRoom(manager: RoomManager, now = T0) {
   const res = manager.createRoom('Alpha 1', SIDC, 'sock-leader', now);
-  if (!res.ok) throw new Error(res.error);
+  if (isErr(res)) throw new Error(res.error);
   return res;
 }
 

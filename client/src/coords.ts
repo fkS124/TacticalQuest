@@ -1,4 +1,4 @@
-import { forward as mgrsForward } from 'mgrs';
+import { forward as mgrsForward, toPoint as mgrsToPoint } from 'mgrs';
 import { bus } from './state';
 
 export type CoordFormat = 'mgrs' | 'utm' | 'latlng';
@@ -35,6 +35,39 @@ export function setCoordFormat(f: CoordFormat): void {
 
 export function cycleCoordFormat(): void {
   setCoordFormat(CYCLE[(CYCLE.indexOf(current) + 1) % CYCLE.length]!);
+}
+
+/**
+ * Analyse une saisie de coordonnées et renvoie { lat, lng }, ou null si non
+ * reconnu / hors limites. Accepte le lat/lng décimal (« 45.12, 5.34 », signes
+ * ou suffixes N/S/E/O/W) et le MGRS (« 31U DQ 48774 43683 », espaces tolérés).
+ */
+export function parseCoords(input: string): { lat: number; lng: number } | null {
+  const s = input.trim();
+  if (!s) return null;
+  const ll = parseLatLng(s);
+  if (ll) return ll;
+  // MGRS : au moins une lettre ; mgrs.toPoint lève si invalide.
+  if (/[A-Za-z]/.test(s)) {
+    try {
+      const [lng, lat] = mgrsToPoint(s);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function parseLatLng(s: string): { lat: number; lng: number } | null {
+  const m = /^([+-]?\d+(?:\.\d+)?)\s*°?\s*([NSns])?\s*[, ]\s*([+-]?\d+(?:\.\d+)?)\s*°?\s*([EWOewo])?$/.exec(s);
+  if (!m) return null;
+  let lat = parseFloat(m[1]!);
+  let lng = parseFloat(m[3]!);
+  if (m[2] && /[Ss]/.test(m[2])) lat = -lat;
+  if (m[4] && /[OoWw]/.test(m[4])) lng = -lng;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
 }
 
 /** Formate au format courant (ou explicite). */

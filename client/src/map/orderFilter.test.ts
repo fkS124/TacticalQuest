@@ -35,6 +35,14 @@ describe('visibleGraphics', () => {
     expect(out[0]!.style.arrow).toBe(true);
   });
 
+  it('conserve le nom et le figuré d’échelon d’une limite', () => {
+    const order = graphic('g1', [[5.7, 45.1], [5.8, 45.2]]);
+    (order.payload as { style: object }).style = { color: '#fff', label: 'LIMITE NORD', echelon: 'company' };
+    const out = visibleGraphics(new Map([['g1', order]]));
+    expect(out[0]!.style.label).toBe('LIMITE NORD');
+    expect(out[0]!.style.echelon).toBe('company');
+  });
+
   it('masque un graphique visé par un remove', () => {
     const orders = new Map<string, OrderMessage>([
       ['g1', graphic('g1', [[5.7, 45.1], [5.8, 45.2]])],
@@ -78,6 +86,16 @@ describe('visibleWaypoints', () => {
     expect(out).toEqual([
       { id: 'w1', authorId: 'a2', name: 'ENI', lat: 45.1, lng: 5.7, sidc: 'SHGP-------' },
     ]);
+  });
+
+  it('conserve la couleur d’un point nommé', () => {
+    const pt: OrderMessage = {
+      id: 'p1', authorId: 'a2', ts: 1, kind: 'waypoint',
+      payload: { kind: 'waypoint', name: 'OBJ ALPHA', lat: 45.1, lng: 5.7, color: '#e8d44d' },
+    };
+    const out = visibleWaypoints(new Map([['p1', pt]]));
+    expect(out[0]!.color).toBe('#e8d44d');
+    expect(out[0]!.sidc).toBeUndefined();
   });
 
   it('masque un plot visé par un remove, sans toucher aux graphiques', () => {

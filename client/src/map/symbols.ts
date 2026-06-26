@@ -1,5 +1,6 @@
 import L from 'leaflet';
 import ms from 'milsymbol';
+import { escapeHtml } from '../util';
 
 // Choix proposés dans le sélecteur (2525C, identité amie → cadre bleu).
 // Cadre rond (équipement, `…E……`) pour les postes de commandement CDS / CDU,
@@ -83,19 +84,26 @@ export const HOSTILE_SIDC = 'SHGP-------';
 
 const plotCache = new Map<string, L.DivIcon>();
 
-/** Icône de plot (positions ennemies, futurs waypoints nommés). */
-export function getPlotIcon(sidc: string): L.DivIcon {
-  const cached = plotCache.get(sidc);
+/**
+ * Icône de plot (positions ennemies). Un `label` non vide est posé en étiquette
+ * flottante à droite du symbole (pastille sombre lisible, cohérente avec les
+ * autres libellés de l'app) — l'amplificateur natif milsymbol étant minuscule
+ * et noir sans fond.
+ */
+export function getPlotIcon(sidc: string, label = ''): L.DivIcon {
+  const key = `${sidc}|${label}`;
+  const cached = plotCache.get(key);
   if (cached) return cached;
   const sym = new ms.Symbol(sidc, { size: 22 });
   const { width, height } = sym.getSize();
   const anchor = sym.getAnchor();
+  const tag = label ? `<b class="tq-plot-label">${escapeHtml(label)}</b>` : '';
   const icon = L.divIcon({
-    html: sym.asSVG(),
+    html: sym.asSVG() + tag,
     className: 'tq-sym tq-plot',
     iconSize: [width, height],
     iconAnchor: [anchor.x, anchor.y],
   });
-  plotCache.set(sidc, icon);
+  plotCache.set(key, icon);
   return icon;
 }

@@ -13,6 +13,7 @@ import type {
   Position,
   ServerToClientEvents,
 } from '@tq/shared/protocol';
+import { isErr } from './rooms';
 import type { Member, Room, RoomManager } from './rooms';
 import type { IpRateLimiter } from './rateLimit';
 
@@ -78,7 +79,7 @@ export function registerHandlers(io: TqServer, manager: RoomManager, limiter: Ip
       if (!p || !isValidCallsign(p.callsign) || !isValidSidc(p.sidc)) return fail(ack, 'INVALID_PAYLOAD');
       if (!limiter.tryCreate(ip)) return fail(ack, 'RATE_LIMITED');
       const res = manager.createRoom(p.callsign.trim(), p.sidc, socket.id);
-      if (!res.ok) return fail(ack, res.error);
+      if (isErr(res)) return fail(ack, res.error);
       enterRoom(socket, res.room, res.member);
       ack({
         ok: true,
@@ -97,7 +98,7 @@ export function registerHandlers(io: TqServer, manager: RoomManager, limiter: Ip
       const code = p.roomCode.trim().toUpperCase();
       const res = manager.joinRoom(code, p.callsign.trim(), p.sidc, socket.id);
       // Délai sur ROOM_NOT_FOUND : ralentit le brute-force des codes.
-      if (!res.ok) return fail(ack, res.error, res.error === 'ROOM_NOT_FOUND');
+      if (isErr(res)) return fail(ack, res.error, res.error === 'ROOM_NOT_FOUND');
       enterRoom(socket, res.room, res.member);
       socket.to(res.room.code).emit('member_joined', { member: manager.memberPublic(res.member) });
       ack({
@@ -115,7 +116,7 @@ export function registerHandlers(io: TqServer, manager: RoomManager, limiter: Ip
         return fail(ack, 'INVALID_PAYLOAD');
       }
       const res = manager.rejoin(p.roomCode, p.memberId, p.sessionToken, socket.id);
-      if (!res.ok) return fail(ack, res.error, true);
+      if (isErr(res)) return fail(ack, res.error, true);
       enterRoom(socket, res.room, res.member);
       socket.to(res.room.code).emit('member_updated', { memberId: res.member.id, connected: true });
       ack({ ok: true, roomState: manager.roomState(res.room) });

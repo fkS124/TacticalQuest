@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { forward as mgrsForward } from 'mgrs';
-import { formatCoords, latitudeBand, toUtm, utmZone } from './coords';
+import { formatCoords, latitudeBand, parseCoords, toUtm, utmZone } from './coords';
 
 // Notre UTM est validé par recoupement avec le paquet mgrs : dans un carré
 // de 100 km, les chiffres MGRS sont l'easting/northing UTM modulo 100 000.
@@ -47,5 +47,27 @@ describe('formatage', () => {
   it('géographique', () => {
     expect(formatCoords(45.1885, 5.7245, 'latlng')).toBe('45.18850°N 5.72450°E');
     expect(formatCoords(-33.8688, -70.6, 'latlng')).toBe('33.86880°S 70.60000°O');
+  });
+});
+
+describe('parseCoords', () => {
+  it('lat/lng décimal (virgule ou espace)', () => {
+    expect(parseCoords('45.1885, 5.7245')).toEqual({ lat: 45.1885, lng: 5.7245 });
+    expect(parseCoords('45.1885 5.7245')).toEqual({ lat: 45.1885, lng: 5.7245 });
+  });
+  it('lat/lng avec hémisphères N/S/E/O', () => {
+    expect(parseCoords('33.8688S, 70.6O')).toEqual({ lat: -33.8688, lng: -70.6 });
+    expect(parseCoords('45.1885°N 5.7245°E')).toEqual({ lat: 45.1885, lng: 5.7245 });
+  });
+  it('MGRS (round-trip avec le formatage)', () => {
+    const p = parseCoords('31T GL 14026 07502');
+    expect(p).not.toBeNull();
+    expect(p!.lat).toBeCloseTo(45.1885, 2);
+    expect(p!.lng).toBeCloseTo(5.7245, 2);
+  });
+  it('rejette une saisie invalide ou hors limites', () => {
+    expect(parseCoords('')).toBeNull();
+    expect(parseCoords('coucou')).toBeNull();
+    expect(parseCoords('95, 200')).toBeNull();
   });
 });

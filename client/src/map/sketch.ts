@@ -99,6 +99,21 @@ export class PolylineSketch {
     return pts;
   }
 
+  /**
+   * Fige l'esquisse : commet le point sous le réticule comme dernier sommet,
+   * stoppe le suivi du réticule et efface le segment d'aperçu. Le tracé reste
+   * affiché tel quel (utile pour garder la ligne visible sous un menu).
+   */
+  freeze(): L.LatLng[] {
+    this.map.off('move', this.onMove);
+    const pts = this.getFinalPoints();
+    this.points.length = 0;
+    this.points.push(...pts);
+    this.line.setLatLngs(this.points);
+    this.preview.setLatLngs([]);
+    return [...this.points];
+  }
+
   /** Longueur posée + segment d'aperçu vers le réticule. */
   previewLengthM(): number {
     let total = 0;

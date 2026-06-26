@@ -19,7 +19,7 @@ export const DEFAULT_SIDC = 'SFGPE----------'; // CDS (rond, chef de section)
 // pas de la situation tactique.
 export const DISCONNECT_GRACE_MS = 20 * 60_000;
 // Doit dépasser la grâce, sinon la room serait GC avant ses membres.
-export const ROOM_EMPTY_TTL_MS = 30 * 60_000;
+export const ROOM_EMPTY_TTL_MS = 24 * 60 * 60_000;
 export const ROOM_MAX_AGE_MS = 24 * 60 * 60_000;
 export const GC_INTERVAL_MS = 60_000;
 

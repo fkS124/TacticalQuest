@@ -43,6 +43,17 @@ export interface Room {
 
 export type Result<T> = ({ ok: true } & T) | { ok: false; error: ErrorCode };
 
+/**
+ * Garde de type vers la branche d'échec. On ne se repose PAS sur le
+ * rétrécissement de `if (!res.ok)` : soustraire le membre par intersection
+ * `{ ok: true } & T` d'une union échoue selon la version de TypeScript (OK en
+ * local, KO sur d'autres builds — ex. Vercel). Un prédicat explicite narrow de
+ * façon fiable partout.
+ */
+export function isErr<T>(r: Result<T>): r is { ok: false; error: ErrorCode } {
+  return !r.ok;
+}
+
 export interface SweepEvents {
   /** Membres dont la période de grâce a expiré. */
   memberTimeouts: { roomCode: string; memberId: string }[];

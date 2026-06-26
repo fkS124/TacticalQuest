@@ -1,5 +1,5 @@
 import L from 'leaflet';
-import type { OrderMessage } from '@tq/shared/protocol';
+import type { LineEchelon, OrderMessage } from '@tq/shared/protocol';
 import { formatCoords } from '../coords';
 import { distanceM } from '../geo';
 import { escapeHtml, formatDistance } from '../util';
@@ -15,15 +15,69 @@ function isSamePoint(a: [number, number], b: [number, number]): boolean {
   return Math.abs(a[0] - b[0]) < 1e-5 && Math.abs(a[1] - b[1]) < 1e-5;
 }
 
+/** Point à mi-longueur cumulée, et le segment qui le porte (pour l'orientation). */
+interface MidPoint {
+  at: [number, number];
+  a: [number, number];
+  b: [number, number];
+}
+function midpointAlong(pts: [number, number][]): MidPoint | null {
+  if (pts.length < 2) return null;
+  const segs: number[] = [];
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const d = distanceM(
+      { lat: pts[i - 1]![0], lng: pts[i - 1]![1] },
+      { lat: pts[i]![0], lng: pts[i]![1] },
+    );
+    segs.push(d);
+    total += d;
+  }
+  if (total === 0) return { at: pts[0]!, a: pts[0]!, b: pts[1]! };
+  let half = total / 2;
+  for (let i = 0; i < segs.length; i++) {
+    if (half <= segs[i]! || i === segs.length - 1) {
+      const t = segs[i]! === 0 ? 0 : half / segs[i]!;
+      const a = pts[i]!;
+      const b = pts[i + 1]!;
+      return { at: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], a, b };
+    }
+    half -= segs[i]!;
+  }
+  return { at: pts[0]!, a: pts[0]!, b: pts[1]! };
+}
+
+/** Icône d'un point nommé : rond coloré (cliquable, 16×16) + libellé à droite. */
+function pointIcon(color: string, name: string): L.DivIcon {
+  return L.divIcon({
+    className: 'tq-point',
+    html: `<i class="pt-dot" style="background:${color}"></i><b class="pt-name">${escapeHtml(name)}</b>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+  });
+}
+
 type Rendered =
   | {
       kind: 'graphic';
       graphic: GraphicOrder;
-      line: L.Polyline;
+      /** Polyligne (liseré/flèche) ou polygone (box). */
+      line: L.Polyline | L.Polygon;
       /** Pointe de flèche, recalculée à chaque zoom (géométrie en pixels). */
       head: L.Polyline | null;
+      /** Étiquette posée à un bout de la ligne (ancrée en géographique). */
+      label: L.Marker | null;
+      /** Figuré d'échelon au centre de la ligne (ancré en géographique). */
+      echelon: L.Marker | null;
     }
   | { kind: 'plot'; marker: L.Marker };
+
+/** Glyphes d'échelon (limite inter-unités), colorés via `currentColor`. */
+const ECHELON_GLYPH: Record<LineEchelon, string> = {
+  section: '<i class="ech-dot"></i><i class="ech-dot"></i><i class="ech-dot"></i>',
+  company: '<i class="ech-bar"></i>',
+  battalion: '<i class="ech-bar"></i><i class="ech-bar"></i>',
+};
 
 export interface OrdersLayerCallbacks {
   /** Peut-on supprimer cet élément ? (chef ou auteur) */
@@ -70,6 +124,8 @@ export class OrdersLayer {
     if (r.kind === 'graphic') {
       r.line.remove();
       r.head?.remove();
+      r.label?.remove();
+      r.echelon?.remove();
     } else {
       r.marker.remove();
     }
@@ -77,25 +133,88 @@ export class OrdersLayer {
 
   private renderGraphic(g: GraphicOrder): void {
     const color = g.style.color ?? DEFAULT_COLOR;
-    const line = L.polyline(g.latlngs, {
-      color,
-      weight: g.style.weight ?? 4,
-      dashArray: g.style.dashArray,
-      opacity: 0.9,
-    }).addTo(this.map);
+    const weight = g.style.weight ?? 4;
+    // Une box est une polyligne fermée, remplie en semi-transparent.
+    const line = g.style.polygon
+      ? L.polygon(g.latlngs, { color, weight, fillColor: color, fillOpacity: 0.18, opacity: 0.9 }).addTo(this.map)
+      : L.polyline(g.latlngs, { color, weight, dashArray: g.style.dashArray, opacity: 0.9 }).addTo(this.map);
     line.on('click', (e) => {
       if (this.cb.isSketching()) return;
       L.DomEvent.stop(e);
       this.openGraphicPopup(g, e.latlng);
     });
-    const r: Rendered = { kind: 'graphic', graphic: g, line, head: null };
-    if (g.style.arrow) r.head = this.makeHead(g, color);
+    const r: Rendered = { kind: 'graphic', graphic: g, line, head: null, label: null, echelon: null };
+    // Flèche et figuré d'échelon ne concernent que les lignes ouvertes.
+    if (g.style.arrow && !g.style.polygon) r.head = this.makeHead(g, color);
+    if (g.style.label) {
+      r.label = g.style.polygon
+        ? this.makeCenteredLabel(line.getCenter(), g.style.label, color)
+        : this.makeLabel(g, color);
+    }
+    if (g.style.echelon && !g.style.polygon) r.echelon = this.makeEchelon(g, color);
     this.rendered.set(g.id, r);
+  }
+
+  /** Nom de la ligne, posé à son dernier sommet (flottant en haut à droite). */
+  private makeLabel(g: GraphicOrder, color: string): L.Marker {
+    const end = g.latlngs[g.latlngs.length - 1]!;
+    const icon = L.divIcon({
+      className: 'tq-line-label',
+      html: `<span style="color:${color}">${escapeHtml(g.style.label!)}</span>`,
+      iconSize: [0, 0],
+      iconAnchor: [0, 0],
+    });
+    return L.marker(end, { icon, interactive: false, zIndexOffset: 400 }).addTo(this.map);
+  }
+
+  /** Nom centré sur un point (utilisé au centre d'une box). */
+  private makeCenteredLabel(at: L.LatLng, text: string, color: string): L.Marker {
+    const icon = L.divIcon({
+      className: 'tq-box-label',
+      html: `<span style="color:${color}">${escapeHtml(text)}</span>`,
+      iconSize: [0, 0],
+      iconAnchor: [0, 0],
+    });
+    return L.marker(at, { icon, interactive: false, zIndexOffset: 400 }).addTo(this.map);
+  }
+
+  /**
+   * Figuré d'échelon (points/barres) au milieu de la ligne, orienté selon
+   * celle-ci : le glyphe est aligné sur la direction de la ligne, donc les
+   * points la suivent et les barres la traversent (perpendiculaires).
+   */
+  private makeEchelon(g: GraphicOrder, color: string): L.Marker | null {
+    const mid = midpointAlong(g.latlngs);
+    if (!mid) return null;
+    const angle = this.segmentAngleDeg(mid.a, mid.b);
+    const transform = `translate(-50%, -50%) rotate(${angle}deg)`;
+    const icon = L.divIcon({
+      className: 'tq-echelon',
+      html: `<span class="ech" style="color:${color};transform:${transform}">${ECHELON_GLYPH[g.style.echelon!]}</span>`,
+      iconSize: [0, 0],
+      iconAnchor: [0, 0],
+    });
+    return L.marker(mid.at, { icon, interactive: false, zIndexOffset: 400 }).addTo(this.map);
+  }
+
+  /**
+   * Angle à l'écran (degrés, sens horaire) du segment a→b. La projection
+   * Mercator étant conforme, cet angle est invariant au zoom : inutile de le
+   * recalculer (contrairement à la pointe de flèche, dimensionnée en pixels).
+   * Ramené dans [-90, 90] pour que le glyphe ne se retourne pas.
+   */
+  private segmentAngleDeg(a: [number, number], b: [number, number]): number {
+    const pa = this.map.latLngToLayerPoint(L.latLng(a[0], a[1]));
+    const pb = this.map.latLngToLayerPoint(L.latLng(b[0], b[1]));
+    let deg = (Math.atan2(pb.y - pa.y, pb.x - pa.x) * 180) / Math.PI;
+    if (deg > 90) deg -= 180;
+    if (deg < -90) deg += 180;
+    return deg;
   }
 
   private renderPlot(w: WaypointOrder): void {
     const marker = L.marker([w.lat, w.lng], {
-      icon: getPlotIcon(w.sidc ?? HOSTILE_SIDC),
+      icon: w.color ? pointIcon(w.color, w.name) : getPlotIcon(w.sidc ?? HOSTILE_SIDC, w.name),
       zIndexOffset: 500,
     }).addTo(this.map);
     marker.on('click', (e) => {
@@ -152,6 +271,13 @@ export class OrdersLayer {
   }
 
   private openGraphicPopup(g: GraphicOrder, at: L.LatLng): void {
+    const fallback = g.style.polygon ? 'Box' : g.style.arrow ? 'Flèche' : 'Liseré';
+    const name = g.style.label ? escapeHtml(g.style.label) : fallback;
+    // Box : le périmètre n'apporte rien — on n'affiche que le nom.
+    if (g.style.polygon) {
+      this.openPopup(g.id, g.authorId, `<b>${name}</b>`, at);
+      return;
+    }
     let len = 0;
     for (let i = 1; i < g.latlngs.length; i++) {
       len += distanceM(
@@ -159,7 +285,7 @@ export class OrdersLayer {
         { lat: g.latlngs[i]![0], lng: g.latlngs[i]![1] },
       );
     }
-    const title = `<b>${g.style.arrow ? 'Flèche' : 'Liseré'}</b> — ${formatDistance(len)}`;
+    const title = `<b>${name}</b> — ${formatDistance(len)}`;
     this.openPopup(g.id, g.authorId, title, at);
   }
 
