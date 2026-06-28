@@ -637,6 +637,19 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
   z-index: 1;
 }
 #sketchbar[hidden] { display: none; }
+/* Mesure : la barre devient un bandeau bas-centre, dans l'espace libre entre le
+   cluster de coordonnées (bas gauche) et les outils (bas droite). Ancrée au
+   viewport (enfant de #map-screen), elle ne masque jamais le réticule central
+   qu'on pointe pour mesurer. Plus spécifique que la règle paysage de #sketchbar,
+   donc s'applique dans les deux orientations. */
+#sketchbar.measure-hud {
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  right: auto;
+  top: auto;
+  transform: translateX(-50%);
+  z-index: 1100;
+}
 #sketch-info {
   font-variant-numeric: tabular-nums;
   font-weight: 600;

@@ -294,10 +294,20 @@ function startSketch(mode: SketchMode): void {
   const isMeasure = mode === 'measure';
   $('sketch-colors').hidden = isMeasure;
   $('sketch-ok').textContent = isMeasure ? 'Fermer' : 'Valider';
-  // La barre contextuelle vient se loger à gauche du bouton de l'outil actif.
   const btn = $(`tool-${mode}`);
   const bar = $('sketchbar');
-  btn.parentElement!.insertBefore(bar, btn);
+  if (isMeasure) {
+    // Mesure : la barre reste enfant de #map-screen et s'ancre en bas-centre
+    // (hors de l'axe de visée). Logée dans la rangée du bouton mesure — haute
+    // dans la pile, donc proche du centre vertical — elle masquait le réticule
+    // central qu'on pointe justement pour mesurer.
+    bar.classList.add('measure-hud');
+    $('map-screen').appendChild(bar);
+  } else {
+    // La barre contextuelle vient se loger à gauche du bouton de l'outil actif.
+    bar.classList.remove('measure-hud');
+    btn.parentElement!.insertBefore(bar, btn);
+  }
   bar.hidden = false;
 
   sketch = new PolylineSketch(map, {
