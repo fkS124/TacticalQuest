@@ -8,10 +8,18 @@ import { MAX_ORDER_BYTES } from '@tq/shared/constants';
 import { registerHandlers } from './handlers';
 import { RoomManager } from './rooms';
 import { IpRateLimiter } from './rateLimit';
+import { createPersistence } from './persistence';
 
 const PORT = Number(process.env.PORT ?? 3000);
+// DATA_DIR = volume persistant en prod (cf. fly.toml), dossier local en dev.
+const DATA_DIR = process.env.DATA_DIR ?? path.resolve(process.cwd(), '.data');
+const SNAPSHOT_PATH = process.env.SNAPSHOT_PATH ?? path.join(DATA_DIR, 'snapshot.json');
+const SNAPSHOT_INTERVAL_MS = Number(process.env.SNAPSHOT_INTERVAL_MS ?? 10_000);
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.resolve(dirname, '../../client/dist');
+
+const manager = new RoomManager();
+const persistence = createPersistence(manager, SNAPSHOT_PATH, SNAPSHOT_INTERVAL_MS);
 
 const app = express();
 app.disable('x-powered-by');
@@ -50,8 +58,32 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: MAX_ORDER_BYTES * 2,
 });
 
-registerHandlers(io, new RoomManager(), new IpRateLimiter());
+const stopHandlers = registerHandlers(io, manager, new IpRateLimiter());
 
-httpServer.listen(PORT, () => {
-  console.log(`TacticalQuest serveur sur http://localhost:${PORT}`);
-});
+async function main() {
+  // Recharger l'état AVANT d'écouter : les clients qui se reconnectent doivent
+  // retrouver leur room dès le premier rejoin.
+  await persistence.load();
+  persistence.start();
+  httpServer.listen(PORT, () => {
+    console.log(`TacticalQuest serveur sur http://localhost:${PORT}`);
+  });
+}
+
+let shuttingDown = false;
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} reçu : sauvegarde de l'état puis arrêt.`);
+  persistence.stop();
+  stopHandlers();
+  io.close();
+  // Snapshot final : on ne perd pas les secondes depuis la dernière sauvegarde.
+  await persistence.save();
+  process.exit(0);
+}
+// Fly envoie SIGTERM avant chaque arrêt/redéploiement.
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));
+
+void main();

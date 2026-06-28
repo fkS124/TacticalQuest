@@ -41,6 +41,22 @@ export interface Room {
   recentOrders: OrderMessage[];
 }
 
+/** Snapshot sérialisable d'une room (JSON sur disque, cf. persistence.ts). */
+export interface RoomSnapshot {
+  code: string;
+  createdAt: number;
+  emptySince: number | null;
+  members: Member[];
+  recentOrders: OrderMessage[];
+}
+
+/** Photo complète de l'état serveur, écrite/rechargée sur le volume. */
+export interface ManagerSnapshot {
+  version: 1;
+  savedAt: number;
+  rooms: RoomSnapshot[];
+}
+
 export type Result<T> = ({ ok: true } & T) | { ok: false; error: ErrorCode };
 
 /**
@@ -172,6 +188,49 @@ export class RoomManager {
       }
     }
     return events;
+  }
+
+  /** Photo sérialisable de toutes les rooms, pour la persistance disque. */
+  snapshot(): ManagerSnapshot {
+    return {
+      version: 1,
+      savedAt: Date.now(),
+      rooms: [...this.rooms.values()].map((room) => ({
+        code: room.code,
+        createdAt: room.createdAt,
+        emptySince: room.emptySince,
+        members: [...room.members.values()],
+        recentOrders: room.recentOrders,
+      })),
+    };
+  }
+
+  /**
+   * Restaure l'état depuis un snapshot, au démarrage du process. Tous les
+   * membres repartent déconnectés : aucun socket ne survit à un redémarrage.
+   * Ils restent en période de grâce et se re-binderont via `rejoin`
+   * (sessionToken) dès que leur PWA se reconnecte. Sur snapshot invalide on ne
+   * touche à rien (démarrage à vide).
+   */
+  restore(snap: ManagerSnapshot, now = Date.now()): void {
+    if (!snap || snap.version !== 1 || !Array.isArray(snap.rooms)) return;
+    this.rooms.clear();
+    for (const rs of snap.rooms) {
+      const members = new Map<string, Member>();
+      for (const m of rs.members ?? []) {
+        members.set(m.id, { ...m, connected: false, socketId: null });
+      }
+      const room: Room = {
+        code: rs.code,
+        createdAt: rs.createdAt,
+        emptySince: rs.emptySince,
+        members,
+        recentOrders: rs.recentOrders ?? [],
+      };
+      this.rooms.set(room.code, room);
+      // Plus personne de connecté : (re)déclenche le compte à rebours "vide".
+      this.refreshEmptySince(room, now);
+    }
   }
 
   memberPublic(m: Member): MemberPublic {
