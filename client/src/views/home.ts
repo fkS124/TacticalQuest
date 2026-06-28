@@ -8,6 +8,7 @@ import { enterMap } from './mapView';
 const ERROR_FR: Record<ErrorCode, string> = {
   ROOM_NOT_FOUND: 'Salle introuvable. Vérifiez le code.',
   CALLSIGN_TAKEN: 'Cet indicatif est déjà utilisé dans la salle.',
+  CALLSIGN_TAKEN_DISCONNECTED: 'Cet indicatif est utilisé mais déconnecté.',
   ROOM_FULL: 'La salle est pleine.',
   SERVER_FULL: 'Le serveur est saturé. Réessayez plus tard.',
   SESSION_INVALID: 'Session expirée.',
@@ -26,6 +27,7 @@ export function showHome(message?: string): void {
   // rejoin en un clic plutôt que de repartir d'un formulaire vide.
   if (message) prefillFromLastRoom();
   showError(message ?? null);
+  hideReplace();
   renderHistory();
 }
 
@@ -42,6 +44,11 @@ function showError(msg: string | null): void {
   const el = $('home-error');
   el.hidden = !msg;
   el.textContent = msg ?? '';
+}
+
+/** Cache la proposition de remplacement d'un indicatif déconnecté. */
+function hideReplace(): void {
+  $('btn-replace').hidden = true;
 }
 
 function setBusy(busy: boolean): void {
@@ -101,14 +108,22 @@ export function initHome(): void {
   });
 
   $('btn-join').addEventListener('click', () => void attemptJoin());
-  $<HTMLInputElement>('join-code').addEventListener('keydown', (e) => {
+  $('btn-replace').addEventListener('click', () => void attemptJoin(true));
+  const joinInput = $<HTMLInputElement>('join-code');
+  joinInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') void attemptJoin();
   });
+  // Toute édition rend la proposition de remplacement obsolète (autre indicatif/salle).
+  joinInput.addEventListener('input', hideReplace);
+  $<HTMLInputElement>('callsign').addEventListener('input', hideReplace);
   renderHistory();
 }
 
-/** Rejoint la salle dont le code est saisi (ou pré-rempli par un chip d'historique). */
-async function attemptJoin(): Promise<void> {
+/**
+ * Rejoint la salle dont le code est saisi (ou pré-rempli par un chip d'historique).
+ * `replace` reprend l'indicatif d'un membre déconnecté, après confirmation.
+ */
+async function attemptJoin(replace = false): Promise<void> {
   const callsign = readCallsign();
   if (!callsign) return;
   const code = $<HTMLInputElement>('join-code').value.trim().toUpperCase();
@@ -116,13 +131,22 @@ async function attemptJoin(): Promise<void> {
     return showError(`Le code de salle fait ${ROOM_CODE_LENGTH} caractères.`);
   setBusy(true);
   showError(null);
+  hideReplace();
   try {
-    const res = await joinRoom(code, callsign, selectedSidc);
+    const res = await joinRoom(code, callsign, selectedSidc, replace);
     if (!res.ok) {
       // Salle disparue (GC serveur) : on purge l'entrée d'historique périmée.
       if (res.error === 'ROOM_NOT_FOUND') {
         removeRoomFromHistory(code);
         renderHistory();
+      }
+      // Indicatif tenu par un membre déconnecté : on propose de le remplacer.
+      if (res.error === 'CALLSIGN_TAKEN_DISCONNECTED') {
+        showError(ERROR_FR[res.error]);
+        const btn = $('btn-replace');
+        btn.textContent = `Remplacer « ${callsign} » (déconnecté)`;
+        btn.hidden = false;
+        return;
       }
       return showError(ERROR_FR[res.error]);
     }

@@ -78,16 +78,31 @@ export class RoomManager {
     return { ok: true, room, member };
   }
 
-  joinRoom(code: string, callsign: string, sidc: string, socketId: string, now = Date.now()): Result<{ room: Room; member: Member }> {
+  joinRoom(
+    code: string,
+    callsign: string,
+    sidc: string,
+    socketId: string,
+    now = Date.now(),
+    replace = false,
+  ): Result<{ room: Room; member: Member; replacedMemberId?: string }> {
     const room = this.rooms.get(code);
     if (!room) return { ok: false, error: 'ROOM_NOT_FOUND' };
-    if (room.members.size >= MAX_MEMBERS_PER_ROOM) return { ok: false, error: 'ROOM_FULL' };
-    const taken = [...room.members.values()].some(
+    const existing = [...room.members.values()].find(
       (m) => m.callsign.toLowerCase() === callsign.toLowerCase(),
     );
-    if (taken) return { ok: false, error: 'CALLSIGN_TAKEN' };
+    let replacedMemberId: string | undefined;
+    if (existing) {
+      // Connecté : indicatif réellement occupé, refus net.
+      if (existing.connected) return { ok: false, error: 'CALLSIGN_TAKEN' };
+      // Déconnecté : remplaçable, mais seulement sur confirmation explicite.
+      if (!replace) return { ok: false, error: 'CALLSIGN_TAKEN_DISCONNECTED' };
+      room.members.delete(existing.id); // évince le fantôme, libère une place
+      replacedMemberId = existing.id;
+    }
+    if (room.members.size >= MAX_MEMBERS_PER_ROOM) return { ok: false, error: 'ROOM_FULL' };
     const member = this.addMember(room, callsign, sidc, socketId, false, now);
-    return { ok: true, room, member };
+    return { ok: true, room, member, replacedMemberId };
   }
 
   rejoin(code: string, memberId: string, sessionToken: string, socketId: string, now = Date.now()): Result<{ room: Room; member: Member }> {

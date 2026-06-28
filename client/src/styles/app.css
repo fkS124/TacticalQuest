@@ -146,6 +146,10 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
 
 .error { color: var(--danger); margin: 0; }
 
+/* Proposition de reprise d'un indicatif déconnecté : action destructrice → rouge. */
+.btn-replace { background: var(--danger); color: #fff; font-weight: 600; }
+.btn-replace[hidden] { display: none; }
+
 /* ----- sélecteur de symbole ----- */
 #symbol-grid {
   display: grid;

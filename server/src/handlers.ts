@@ -96,10 +96,14 @@ export function registerHandlers(io: TqServer, manager: RoomManager, limiter: Ip
         return fail(ack, 'INVALID_PAYLOAD');
       }
       const code = p.roomCode.trim().toUpperCase();
-      const res = manager.joinRoom(code, p.callsign.trim(), p.sidc, socket.id);
+      const res = manager.joinRoom(code, p.callsign.trim(), p.sidc, socket.id, undefined, p.replace === true);
       // Délai sur ROOM_NOT_FOUND : ralentit le brute-force des codes.
       if (isErr(res)) return fail(ack, res.error, res.error === 'ROOM_NOT_FOUND');
       enterRoom(socket, res.room, res.member);
+      // Remplacement d'un indicatif déconnecté : signaler le départ du fantôme.
+      if (res.replacedMemberId) {
+        socket.to(res.room.code).emit('member_left', { memberId: res.replacedMemberId, reason: 'left' });
+      }
       socket.to(res.room.code).emit('member_joined', { member: manager.memberPublic(res.member) });
       ack({
         ok: true,

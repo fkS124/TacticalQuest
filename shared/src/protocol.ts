@@ -84,6 +84,8 @@ export interface OrderMessage {
 export type ErrorCode =
   | 'ROOM_NOT_FOUND'
   | 'CALLSIGN_TAKEN'
+  /** Indicatif tenu par un membre déconnecté : remplaçable via join_room { replace: true }. */
+  | 'CALLSIGN_TAKEN_DISCONNECTED'
   | 'ROOM_FULL'
   | 'SERVER_FULL'
   | 'SESSION_INVALID'
@@ -113,7 +115,7 @@ export interface ClientToServerEvents {
     ack: (res: Ack<JoinedRoom>) => void,
   ) => void;
   join_room: (
-    p: { roomCode: string; callsign: string; sidc: string },
+    p: { roomCode: string; callsign: string; sidc: string; replace?: boolean },
     ack: (res: Ack<JoinedRoom>) => void,
   ) => void;
   rejoin_room: (

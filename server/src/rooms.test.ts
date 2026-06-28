@@ -36,11 +36,35 @@ describe('join', () => {
     expect(res).toEqual({ ok: false, error: 'ROOM_NOT_FOUND' });
   });
 
-  it('rejette un indicatif déjà pris (insensible à la casse)', () => {
+  it('rejette un indicatif tenu par un membre connecté', () => {
     const manager = new RoomManager();
     const { room } = createdRoom(manager);
     const res = manager.joinRoom(room.code, 'alpha 1', SIDC, 's2', T0);
     expect(res).toEqual({ ok: false, error: 'CALLSIGN_TAKEN' });
+  });
+
+  it('signale (sans remplacer) un indicatif tenu par un membre déconnecté', () => {
+    const manager = new RoomManager();
+    const { room, member } = createdRoom(manager);
+    manager.markDisconnected(room.code, member.id, T0 + 1000);
+    const res = manager.joinRoom(room.code, 'alpha 1', SIDC, 's2', T0 + 2000);
+    expect(res).toEqual({ ok: false, error: 'CALLSIGN_TAKEN_DISCONNECTED' });
+    expect(room.members.size).toBe(1); // le fantôme n'est pas touché
+  });
+
+  it('remplace un indicatif déconnecté quand replace=true (évince le fantôme)', () => {
+    const manager = new RoomManager();
+    const { room, member } = createdRoom(manager);
+    manager.markDisconnected(room.code, member.id, T0 + 1000);
+    const res = manager.joinRoom(room.code, 'Alpha 1', SIDC, 's2', T0 + 2000, true);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.replacedMemberId).toBe(member.id);
+      expect(res.member.id).not.toBe(member.id);
+      expect(res.member.connected).toBe(true);
+    }
+    expect(room.members.size).toBe(1); // l'ancien évincé, le nouveau à sa place
+    expect(room.members.has(member.id)).toBe(false);
   });
 
   it('le créateur est chef, les suivants non', () => {

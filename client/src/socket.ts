@@ -149,9 +149,12 @@ export async function joinRoom(
   roomCode: string,
   callsign: string,
   sidc: string,
+  replace = false,
 ): Promise<Ack<JoinedRoom>> {
   ensureConnected();
-  const res = await socket.timeout(ACK_TIMEOUT_MS).emitWithAck('join_room', { roomCode, callsign, sidc });
+  const res = await socket
+    .timeout(ACK_TIMEOUT_MS)
+    .emitWithAck('join_room', { roomCode, callsign, sidc, replace });
   if (res.ok) applyRoomState(res.roomState);
   return res;
 }
