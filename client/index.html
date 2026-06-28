@@ -34,9 +34,14 @@
     <div class="separator"><span>ou</span></div>
 
     <div class="join-row">
-      <input id="join-code" type="text" maxlength="6" autocomplete="off"
+      <input id="join-code" type="text" maxlength="5" autocomplete="off"
              autocapitalize="characters" placeholder="CODE" enterkeyhint="go" />
       <button id="btn-join" class="btn">Rejoindre</button>
+    </div>
+
+    <div id="room-history" class="room-history" hidden>
+      <span class="room-history-label">Salles récentes</span>
+      <div id="room-history-list" class="room-history-list"></div>
     </div>
 
     <p id="home-error" class="error" hidden></p>

@@ -1,6 +1,6 @@
-import { DEFAULT_SIDC, CALLSIGN_REGEX } from '@tq/shared/constants';
+import { DEFAULT_SIDC, CALLSIGN_REGEX, ROOM_CODE_LENGTH } from '@tq/shared/constants';
 import type { ErrorCode } from '@tq/shared/protocol';
-import { saveSession } from '../state';
+import { loadLastRoom, loadRoomHistory, removeRoomFromHistory, saveSession } from '../state';
 import { createRoom, joinRoom } from '../socket';
 import { SYMBOL_CHOICES, symbolSvg } from '../map/symbols';
 import { enterMap } from './mapView';
@@ -22,7 +22,20 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 
 export function showHome(message?: string): void {
   document.body.className = 'screen-home';
+  // Session expirée côté serveur : on pré-remplit code + indicatif pour un
+  // rejoin en un clic plutôt que de repartir d'un formulaire vide.
+  if (message) prefillFromLastRoom();
   showError(message ?? null);
+  renderHistory();
+}
+
+function prefillFromLastRoom(): void {
+  const last = loadLastRoom();
+  if (!last) return;
+  const callsign = $<HTMLInputElement>('callsign');
+  const code = $<HTMLInputElement>('join-code');
+  if (!callsign.value) callsign.value = last.callsign;
+  if (!code.value) code.value = last.roomCode;
 }
 
 function showError(msg: string | null): void {
@@ -87,34 +100,86 @@ export function initHome(): void {
     }
   });
 
-  const joinInput = $<HTMLInputElement>('join-code');
-  const doJoin = async () => {
-    const callsign = readCallsign();
-    if (!callsign) return;
-    const code = joinInput.value.trim().toUpperCase();
-    if (code.length !== 6) return showError('Le code de salle fait 6 caractères.');
-    setBusy(true);
-    showError(null);
-    try {
-      const res = await joinRoom(code, callsign, selectedSidc);
-      if (!res.ok) return showError(ERROR_FR[res.error]);
-      saveSession({
-        roomCode: res.roomCode,
-        memberId: res.memberId,
-        sessionToken: res.sessionToken,
-        callsign,
-        sidc: selectedSidc,
-        isLeader: false,
-      });
-      enterMap();
-    } catch {
-      showError('Serveur injoignable. Vérifiez la connexion.');
-    } finally {
-      setBusy(false);
-    }
-  };
-  $('btn-join').addEventListener('click', doJoin);
-  joinInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') void doJoin();
+  $('btn-join').addEventListener('click', () => void attemptJoin());
+  $<HTMLInputElement>('join-code').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') void attemptJoin();
   });
+  renderHistory();
+}
+
+/** Rejoint la salle dont le code est saisi (ou pré-rempli par un chip d'historique). */
+async function attemptJoin(): Promise<void> {
+  const callsign = readCallsign();
+  if (!callsign) return;
+  const code = $<HTMLInputElement>('join-code').value.trim().toUpperCase();
+  if (code.length !== ROOM_CODE_LENGTH)
+    return showError(`Le code de salle fait ${ROOM_CODE_LENGTH} caractères.`);
+  setBusy(true);
+  showError(null);
+  try {
+    const res = await joinRoom(code, callsign, selectedSidc);
+    if (!res.ok) {
+      // Salle disparue (GC serveur) : on purge l'entrée d'historique périmée.
+      if (res.error === 'ROOM_NOT_FOUND') {
+        removeRoomFromHistory(code);
+        renderHistory();
+      }
+      return showError(ERROR_FR[res.error]);
+    }
+    saveSession({
+      roomCode: res.roomCode,
+      memberId: res.memberId,
+      sessionToken: res.sessionToken,
+      callsign,
+      sidc: selectedSidc,
+      isLeader: false,
+    });
+    enterMap();
+  } catch {
+    showError('Serveur injoignable. Vérifiez la connexion.');
+  } finally {
+    setBusy(false);
+  }
+}
+
+/** Liste des salles récentes : un tap pré-remplit indicatif + code et rejoint. */
+function renderHistory(): void {
+  const container = $('room-history');
+  const list = $('room-history-list');
+  const history = loadRoomHistory();
+  container.hidden = history.length === 0;
+  list.replaceChildren();
+
+  for (const entry of history) {
+    const main = document.createElement('button');
+    main.type = 'button';
+    main.className = 'room-chip-main';
+    const code = document.createElement('span');
+    code.className = 'room-chip-code';
+    code.textContent = entry.roomCode;
+    const call = document.createElement('span');
+    call.className = 'room-chip-call';
+    call.textContent = entry.callsign;
+    main.append(code, call);
+    main.addEventListener('click', () => {
+      $<HTMLInputElement>('callsign').value = entry.callsign;
+      $<HTMLInputElement>('join-code').value = entry.roomCode;
+      void attemptJoin();
+    });
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'room-chip-remove';
+    remove.setAttribute('aria-label', `Oublier la salle ${entry.roomCode}`);
+    remove.textContent = '×';
+    remove.addEventListener('click', () => {
+      removeRoomFromHistory(entry.roomCode);
+      renderHistory();
+    });
+
+    const chip = document.createElement('div');
+    chip.className = 'room-chip';
+    chip.append(main, remove);
+    list.appendChild(chip);
+  }
 }

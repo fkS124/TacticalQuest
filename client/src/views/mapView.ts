@@ -6,6 +6,7 @@ import { POSITION_INTERVAL_MS } from '@tq/shared/constants';
 import type { GraphicStyle, LineEchelon, MemberPublic, Position } from '@tq/shared/protocol';
 import { bus, state } from '../state';
 import { cycleCoordFormat, formatCoords, getCoordFormat, parseCoords, setCoordFormat, type CoordFormat } from '../coords';
+import { cachedElevation, coordsWithAltitudeHtml, elevationKey, fetchElevation, hydrateAltitudes } from '../elevation';
 import { connectForSession, leaveRoom, pendingOrderCount, restorePendingOrders, sendOrder, sendPosition } from '../socket';
 import { startGeolocation, type GeoWatcher } from '../geo';
 import { dlog, formatLog, clearLog, onLog } from '../debugLog';
@@ -515,10 +516,32 @@ function closeEniMenu(): void {
 
 // --- coordonnées (réticule central + popups) ---
 
+let elevTimer: ReturnType<typeof setTimeout> | null = null;
+
 function updateReadout(): void {
   if (!map) return;
   const c = map.getCenter();
-  $('coord-readout').textContent = formatCoords(c.lat, c.lng);
+  // Altitude du point visé en dernier groupe, même police : « … 14018 43518 158 ».
+  // Affichée seulement si on la connaît déjà pour ce point : on évite ainsi tout
+  // chiffre périmé hérité d'un endroit qu'on vient de quitter en panoramique.
+  const coords = formatCoords(c.lat, c.lng);
+  const alt = cachedElevation(c.lat, c.lng);
+  $('coord-readout').textContent = alt !== null ? `${coords} ${Math.round(alt)}` : coords;
+  scheduleElevation(c.lat, c.lng);
+}
+
+/** Va chercher l'altitude du centre une fois la carte stabilisée (débounce). */
+function scheduleElevation(lat: number, lng: number): void {
+  if (cachedElevation(lat, lng) !== null) return; // déjà affichée
+  if (elevTimer) clearTimeout(elevTimer);
+  elevTimer = setTimeout(() => {
+    void fetchElevation(lat, lng).then((alt) => {
+      if (alt === null || !map) return;
+      // N'applique le résultat que si le réticule est resté sur ce point.
+      const c = map.getCenter();
+      if (elevationKey(c.lat, c.lng) === elevationKey(lat, lng)) updateReadout();
+    });
+  }, 500);
 }
 
 // --- aller à des coordonnées saisies (MGRS ou lat/lng) ---
@@ -561,8 +584,9 @@ function openMemberPopup(m: MemberPublic): void {
   div.className = 'order-popup';
   div.innerHTML =
     `<b>${escapeHtml(m.callsign)}${LEADER_TAG(m.isLeader)}</b>` +
-    `<span class="coords">${formatCoords(p.lat, p.lng)}</span>` +
+    coordsWithAltitudeHtml(p.lat, p.lng) +
     `<span class="order-author">±${Math.round(p.accuracy)} m · ${memberMeta(m, Date.now())}</span>`;
+  hydrateAltitudes(div);
   L.popup({ className: 'tq-popup' }).setLatLng([p.lat, p.lng]).setContent(div).openOn(map);
 }
 

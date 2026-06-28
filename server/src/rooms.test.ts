@@ -18,7 +18,7 @@ function createdRoom(manager: RoomManager, now = T0) {
 }
 
 describe('génération des codes', () => {
-  it('produit des codes de 6 caractères dans l’alphabet radio', () => {
+  it('produit des codes de longueur ROOM_CODE_LENGTH dans l’alphabet radio', () => {
     const manager = new RoomManager();
     for (let i = 0; i < 50; i++) {
       const { room } = createdRoom(manager);
