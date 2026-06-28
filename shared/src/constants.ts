@@ -2,7 +2,7 @@
 
 // Sans 0/O/1/I/L : le code est destiné à être lu à la voix (radio).
 export const ROOM_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-export const ROOM_CODE_LENGTH = 6;
+export const ROOM_CODE_LENGTH = 5;
 
 export const MAX_ROOMS = 200;
 export const MAX_MEMBERS_PER_ROOM = 40;
@@ -13,14 +13,15 @@ export const CALLSIGN_REGEX = /^[\p{L}\p{N} _-]{1,16}$/u;
 export const SIDC_REGEX = /^[A-Za-z0-9*-]{10,30}$/;
 export const DEFAULT_SIDC = 'SFGPE----------'; // CDS (rond, chef de section)
 
-// Reconnexion : un membre déconnecté est conservé pendant la période de
-// grâce (re-binding via sessionToken) et reste visible en grisé par les
-// autres. 20 min : un téléphone en veille ou en zone blanche ne disparaît
-// pas de la situation tactique.
-export const DISCONNECT_GRACE_MS = 20 * 60_000;
-// Doit dépasser la grâce, sinon la room serait GC avant ses membres.
-export const ROOM_EMPTY_TTL_MS = 24 * 60 * 60_000;
 export const ROOM_MAX_AGE_MS = 24 * 60 * 60_000;
+// Reconnexion : un membre déconnecté est conservé pendant la période de grâce
+// (re-binding via sessionToken) et reste visible en grisé par les autres. On la
+// cale sur la durée de vie de la room : un téléphone mis en veille des heures,
+// en zone blanche ou dont la PWA a été tuée par l'OS retrouve sa place tant que
+// la room existe. Au-delà, la room elle-même a disparu, donc rien à rejoindre.
+export const DISCONNECT_GRACE_MS = ROOM_MAX_AGE_MS;
+// Doit être ≥ à la grâce, sinon la room serait GC avant ses membres.
+export const ROOM_EMPTY_TTL_MS = ROOM_MAX_AGE_MS;
 export const GC_INTERVAL_MS = 60_000;
 
 // Anti-abus.

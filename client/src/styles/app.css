@@ -87,6 +87,63 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
 .join-row { display: flex; gap: 10px; }
 .join-row input { flex: 1; min-width: 0; }
 
+/* Historique des salles récentes : chips « code + indicatif » rejoignables d'un tap. */
+.room-history { display: flex; flex-direction: column; gap: 8px; }
+.room-history[hidden] { display: none; }
+.room-history-label {
+  color: var(--muted);
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.room-history-list { display: flex; flex-direction: column; gap: 8px; }
+.room-chip {
+  align-items: stretch;
+  background: var(--panel);
+  border: 1px solid var(--panel-2);
+  border-radius: 8px;
+  display: flex;
+  overflow: hidden;
+}
+.room-chip-main {
+  align-items: baseline;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  gap: 12px;
+  min-height: 48px; /* cible tactile */
+  min-width: 0;
+  padding: 10px 14px;
+  text-align: left;
+}
+.room-chip-main:active { filter: brightness(1.25); }
+.room-chip-code {
+  font-family: ui-monospace, monospace;
+  font-size: 1.1rem;
+  letter-spacing: 0.2em;
+}
+.room-chip-call {
+  color: var(--muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-chip-remove {
+  background: none;
+  border: none;
+  border-left: 1px solid var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 0 14px;
+}
+.room-chip-remove:active { filter: brightness(1.25); }
+
 .error { color: var(--danger); margin: 0; }
 
 /* ----- sélecteur de symbole ----- */
@@ -204,8 +261,14 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
   font-family: ui-monospace, monospace;
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
+  line-height: 1.25;
   padding: 7px 10px;
+  text-align: left;
 }
+/* Altitude du point visé : dernier groupe de coordonnée, même police que le
+   reste (hérite de .coords / #coord-readout). Vide (inconnue / hors-ligne) →
+   masquée, pas de groupe ni d'espace fantôme. */
+.coord-alt:empty { display: none; }
 .coord-btn {
   align-items: center;
   background: rgba(26, 42, 26, 0.88);
@@ -468,13 +531,16 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
   }
   #fab-stack.open #fab-toggle .ft-open { display: none; }
   #fab-stack.open #fab-toggle .ft-close { display: block; }
-  /* La barre contextuelle d'esquisse flotte au-dessus du bouton actif. */
+  /* La barre contextuelle d'esquisse se loge en bas à gauche, au-dessus du
+     cluster de coordonnées. Décalée de l'axe vertical de visée, elle ne masque
+     jamais le réticule central qu'on pointe pour mesurer (le centrer la cachait
+     sur les écrans bas tenus en paysage). */
   #sketchbar {
-    bottom: 64px;
-    left: 50%;
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    left: 10px;
     right: auto;
     top: auto;
-    transform: translateX(-50%);
+    transform: none;
   }
 }
 

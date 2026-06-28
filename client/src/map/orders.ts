@@ -1,6 +1,6 @@
 import L from 'leaflet';
 import type { LineEchelon, OrderMessage } from '@tq/shared/protocol';
-import { formatCoords } from '../coords';
+import { coordsWithAltitudeHtml, hydrateAltitudes } from '../elevation';
 import { distanceM } from '../geo';
 import { escapeHtml, formatDistance } from '../util';
 import { visibleGraphics, visibleWaypoints, type GraphicOrder, type WaypointOrder } from './orderFilter';
@@ -222,7 +222,7 @@ export class OrdersLayer {
       L.DomEvent.stop(e);
       const title =
         `<b>${escapeHtml(w.name)}</b>` +
-        `<span class="coords">${formatCoords(w.lat, w.lng)}</span>`;
+        coordsWithAltitudeHtml(w.lat, w.lng);
       this.openPopup(w.id, w.authorId, title, e.latlng);
     });
     this.rendered.set(w.id, { kind: 'plot', marker });
@@ -305,6 +305,7 @@ export class OrdersLayer {
       });
       div.appendChild(btn);
     }
+    hydrateAltitudes(div); // remplit l'altitude des coordonnées présentes
     L.popup({ closeButton: true, className: 'tq-popup' }).setLatLng(at).setContent(div).openOn(this.map);
   }
 }

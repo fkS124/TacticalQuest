@@ -14,8 +14,9 @@ if (shouldShowInstallGate()) showInstallGate(startApp);
 else startApp();
 
 function startApp(): void {
-  // Une session en sessionStorage survit au reload / mise en veille :
-  // retour direct sur la carte, le socket fera le rejoin.
+  // Une session en localStorage survit au reload, à la mise en veille et à la
+  // fermeture/relance de la PWA : retour direct sur la carte, le socket fait le
+  // rejoin (re-binding via sessionToken).
   if (loadSession()) enterMap();
   else showHome();
 }

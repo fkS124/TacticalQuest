@@ -9,7 +9,7 @@ import type {
   RoomState,
   ServerToClientEvents,
 } from '@tq/shared/protocol';
-import { applyRoomState, bus, clearSession, setConn, state } from './state';
+import { applyRoomState, bus, clearLastRoom, clearSession, setConn, state } from './state';
 
 const ACK_TIMEOUT_MS = 10_000;
 
@@ -177,7 +177,7 @@ let flushing = false;
 
 function loadOutbox(): OrderMessage[] {
   try {
-    const raw = sessionStorage.getItem(OUTBOX_KEY);
+    const raw = localStorage.getItem(OUTBOX_KEY);
     return raw ? (JSON.parse(raw) as OrderMessage[]) : [];
   } catch {
     return [];
@@ -186,8 +186,10 @@ function loadOutbox(): OrderMessage[] {
 
 function persistOutbox(): void {
   try {
-    if (outbox.length) sessionStorage.setItem(OUTBOX_KEY, JSON.stringify(outbox));
-    else sessionStorage.removeItem(OUTBOX_KEY);
+    // localStorage comme la session : les ordres en attente doivent survivre à
+    // une mise en arrière-plan prolongée de la PWA, pas seulement à un reload.
+    if (outbox.length) localStorage.setItem(OUTBOX_KEY, JSON.stringify(outbox));
+    else localStorage.removeItem(OUTBOX_KEY);
   } catch {
     /* quota : tant pis, la file reste en mémoire */
   }
@@ -250,6 +252,7 @@ export function sendSymbol(sidc: string): void {
 export function leaveRoom(): void {
   if (socket.connected) socket.emit('leave_room');
   clearSession();
+  clearLastRoom(); // départ volontaire : pas de pré-remplissage au retour
   socket.disconnect();
 }
 
