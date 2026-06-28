@@ -1,7 +1,7 @@
 # TacticalQuest — déploiement Fly.io.
 # `fly launch` peut écraser/compléter ce fichier ; le nom d'app doit être unique
 # sur Fly (modifie `app` si "tacticalquest" est déjà pris).
-app = "tacticalquest"
+app = "tacquest"
 primary_region = "cdg"   # Paris
 
 [build]
