@@ -1,8 +1,9 @@
 import L from 'leaflet';
+import { SIDC_REGEX } from '@tq/shared/constants';
 import type { LineEchelon, OrderMessage } from '@tq/shared/protocol';
 import { coordsWithAltitudeHtml, hydrateAltitudes } from '../elevation';
 import { distanceM } from '../geo';
-import { escapeHtml, formatDistance } from '../util';
+import { escapeHtml, formatDistance, safeColor } from '../util';
 import { visibleGraphics, visibleWaypoints, type GraphicOrder, type WaypointOrder } from './orderFilter';
 import { getPlotIcon, HOSTILE_SIDC } from './symbols';
 
@@ -132,7 +133,9 @@ export class OrdersLayer {
   }
 
   private renderGraphic(g: GraphicOrder): void {
-    const color = g.style.color ?? DEFAULT_COLOR;
+    // Ordre relayé = non fiable : on assainit la couleur (injectée dans des
+    // attributs style) avant tout rendu.
+    const color = safeColor(g.style.color) ?? DEFAULT_COLOR;
     const weight = g.style.weight ?? 4;
     // Une box est une polyligne fermée, remplie en semi-transparent.
     const line = g.style.polygon
@@ -213,8 +216,12 @@ export class OrdersLayer {
   }
 
   private renderPlot(w: WaypointOrder): void {
+    // Charge utile non fiable (relais opaque) : couleur assainie, SIDC validé
+    // avant d'être passé à milsymbol.
+    const color = w.color != null ? (safeColor(w.color) ?? DEFAULT_COLOR) : null;
+    const sidc = w.sidc && SIDC_REGEX.test(w.sidc) ? w.sidc : HOSTILE_SIDC;
     const marker = L.marker([w.lat, w.lng], {
-      icon: w.color ? pointIcon(w.color, w.name) : getPlotIcon(w.sidc ?? HOSTILE_SIDC, w.name),
+      icon: color ? pointIcon(color, w.name) : getPlotIcon(sidc, w.name),
       zIndexOffset: 500,
     }).addTo(this.map);
     marker.on('click', (e) => {
@@ -266,7 +273,7 @@ export class OrdersLayer {
     for (const r of this.rendered.values()) {
       if (r.kind !== 'graphic' || !r.graphic.style.arrow) continue;
       r.head?.remove();
-      r.head = this.makeHead(r.graphic, r.graphic.style.color ?? DEFAULT_COLOR);
+      r.head = this.makeHead(r.graphic, safeColor(r.graphic.style.color) ?? DEFAULT_COLOR);
     }
   }
 

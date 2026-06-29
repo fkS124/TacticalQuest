@@ -98,10 +98,27 @@ ADMIN_CODE_HASH=<hash> npm start
 
 Sans ce secret, toute la zone `/admin` renvoie 503 (désactivée). Le code saisi
 sur la page n'est jamais stocké côté serveur ; il transite en
-`Authorization: Bearer` sur chaque appel (donc **HTTPS obligatoire**) et est
-comparé au hash à temps constant. La page est servie hors du build PWA (le
-service worker ignore `/admin`). Terminer une salle ou exclure un membre renvoie
-les clients concernés à l'accueil (`room_closed` `closed`/`kicked`).
+`Authorization: Bearer` sur chaque appel et est comparé au hash à temps constant.
+La page est servie hors du build PWA (le service worker ignore `/admin`).
+Terminer une salle ou exclure un membre renvoie les clients concernés à l'accueil
+(`room_closed` `closed`/`kicked`).
+
+Durcissements :
+
+- **HTTPS imposé au niveau applicatif** : toute requête `/admin` non chiffrée est
+  refusée (403). Détection via `x-forwarded-proto` (posé par Fly/Caddy) ;
+  `localhost` est toléré en dev, et `ADMIN_ALLOW_INSECURE=1` lève la contrainte
+  si vraiment nécessaire.
+- **Verrou anti brute-force** : au-delà de `ADMIN_AUTH_MAX_FAILS` (8) échecs par
+  IP sur 15 min, l'IP est bloquée (429 + `Retry-After`) jusqu'à expiration de la
+  fenêtre — un succès remet le compteur à zéro. Sur Fly, l'IP réelle vient de
+  l'en-tête non usurpable `Fly-Client-IP`. ⚠️ Conséquence assumée : huit fautes
+  de frappe verrouillent la console 15 min — d'où l'intérêt de coller le code
+  généré plutôt que de le retaper.
+
+Le code lui-même doit être à **haute entropie** : le hash stocké est un sha256 nu
+(non salé), donc un code faible serait cassable hors-ligne s'il fuyait. Utiliser
+`node scripts/admin-hash.mjs` sans argument génère un code aléatoire fort.
 
 ## Architecture
 
@@ -116,6 +133,15 @@ tous par une enveloppe générique `OrderMessage` (`shared/src/protocol.ts`,
 champ `kind`). Le serveur la **relaie sans l'interpréter** : valider la taille,
 pousser dans le ring buffer `recentOrders` (livré aux retardataires), diffuser.
 Un nouveau type d'ordre est donc un changement **client uniquement**.
+
+**Corollaire sécurité** : comme le serveur ne valide pas la sémantique des
+payloads (relais opaque), le client traite tout ordre reçu comme **non fiable**.
+Les textes sont échappés (`escapeHtml`) et les champs réinjectés dans des
+attributs HTML sont assainis : `color` passe par `safeColor` (hex ou nom
+alphabétique seulement — bloque l'évasion d'attribut / l'injection CSS) et le
+`sidc` d'un plot est validé contre `SIDC_REGEX` avant milsymbol. Sans cela, un
+participant malveillant pourrait injecter du HTML/JS rendu chez tous les autres
+(XSS stocké).
 
 Côté client, les ordres sont appliqués de façon **optimiste** (visibles
 immédiatement) et placés dans une file persistée (`sessionStorage`) ; la file

@@ -3,6 +3,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import type { Server } from 'socket.io';
 import type { ClientToServerEvents, ServerToClientEvents } from '@tq/shared/protocol';
 import type { RoomManager } from './rooms';
+import { AdminAuthLimiter } from './rateLimit';
 import { ADMIN_HTML } from './adminPage';
 
 type TqServer = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -12,6 +13,34 @@ const FAILED_AUTH_DELAY_MS = 600;
 
 function sha256Hex(s: string): string {
   return createHash('sha256').update(s, 'utf8').digest('hex');
+}
+
+/**
+ * Vrai si la requête arrive en HTTPS (ou en local). Le secret admin circule en
+ * clair dans l'en-tête : on refuse tout transport non chiffré. Sur Fly/Caddy le
+ * proxy pose `x-forwarded-proto: https`. En dev (localhost) on tolère http, et
+ * `ADMIN_ALLOW_INSECURE=1` force la tolérance si besoin.
+ */
+function isSecureRequest(req: Request): boolean {
+  if (process.env.ADMIN_ALLOW_INSECURE === '1') return true;
+  if (req.secure) return true; // TLS direct (req.protocol === 'https')
+  const proto = (req.get('x-forwarded-proto') ?? '').split(',')[0]!.trim().toLowerCase();
+  if (proto === 'https') return true;
+  const host = (req.get('host') ?? '').split(':')[0]!.toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+}
+
+/**
+ * IP réelle du client. Sur Fly, l'en-tête `Fly-Client-IP` est posé par l'edge
+ * et non usurpable (contrairement à `X-Forwarded-For` que n'importe qui peut
+ * forger) — on le préfère pour que le verrou anti brute-force vise la vraie IP.
+ */
+function clientIp(req: Request): string {
+  const fly = req.get('fly-client-ip');
+  if (fly) return fly;
+  const xff = (req.get('x-forwarded-for') ?? '').split(',')[0]!.trim();
+  if (xff) return xff;
+  return req.socket.remoteAddress ?? 'unknown';
 }
 
 /** Comparaison à temps constant de deux hex de même longueur (sha256). */
@@ -32,6 +61,14 @@ function hashesEqual(a: string, b: string): boolean {
  */
 export function createAdminRouter(io: TqServer, manager: RoomManager): Router {
   const router = Router();
+  const limiter = new AdminAuthLimiter();
+
+  // HTTPS obligatoire sur toute la zone : le code circule en clair dans l'en-tête,
+  // et on ne veut pas non plus servir le formulaire de login sur du http.
+  router.use((req: Request, res: Response, next: NextFunction) => {
+    if (isSecureRequest(req)) { next(); return; }
+    res.status(403).type('text').send('HTTPS requis pour la console d’administration.');
+  });
 
   // La page elle-même est publique (elle ne fait qu'inviter à saisir le code) ;
   // ce sont les appels /admin/api/* qui sont authentifiés.
@@ -46,9 +83,21 @@ export function createAdminRouter(io: TqServer, manager: RoomManager): Router {
   api.use((req: Request, res: Response, next: NextFunction) => {
     const expected = process.env.ADMIN_CODE_HASH;
     if (!expected) { res.status(503).json({ error: 'admin_disabled' }); return; }
+    const ip = clientIp(req);
+    // Verrou anti brute-force : trop d'échecs récents pour cette IP → 429.
+    if (!limiter.allow(ip)) {
+      res.set('Retry-After', String(limiter.retryAfterSec(ip)));
+      res.status(429).json({ error: 'too_many_attempts' });
+      return;
+    }
     const header = req.get('authorization') ?? '';
     const code = header.startsWith('Bearer ') ? header.slice(7) : (req.get('x-admin-code') ?? '');
-    if (code && hashesEqual(sha256Hex(code), expected.trim().toLowerCase())) { next(); return; }
+    if (code && hashesEqual(sha256Hex(code), expected.trim().toLowerCase())) {
+      limiter.reset(ip);
+      next();
+      return;
+    }
+    limiter.recordFailure(ip);
     setTimeout(() => res.status(401).json({ error: 'unauthorized' }), FAILED_AUTH_DELAY_MS);
   });
 

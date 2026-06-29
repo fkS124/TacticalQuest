@@ -29,6 +29,12 @@ export const POSITION_MIN_INTERVAL_MS = 900;
 export const ROOM_CREATE_PER_IP_PER_HOUR = 10;
 export const FAILED_JOIN_DELAY_MS = 1_000;
 
+// Console d'admin : verrouillage par IP après trop d'échecs d'authentification
+// (anti brute-force du code admin). Au-delà du seuil dans la fenêtre, l'IP est
+// rejetée (429) jusqu'à expiration de la fenêtre glissante.
+export const ADMIN_AUTH_MAX_FAILS = 8;
+export const ADMIN_AUTH_WINDOW_MS = 15 * 60_000;
+
 // Ordres (phase 5 — le serveur les relaie sans les interpréter).
 // Missions + accusés de réception s'accumulent : marge confortable.
 export const MAX_RECENT_ORDERS = 250;
