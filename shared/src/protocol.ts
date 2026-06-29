@@ -133,9 +133,10 @@ export interface ServerToClientEvents {
   /** Snapshot complet — réconciliation sans diff au (re)join. */
   room_state: (s: RoomState) => void;
   member_joined: (p: { member: MemberPublic }) => void;
-  member_left: (p: { memberId: string; reason: 'left' | 'timeout' }) => void;
+  member_left: (p: { memberId: string; reason: 'left' | 'timeout' | 'kicked' }) => void;
   member_position: (p: { memberId: string; position: Position }) => void;
   member_updated: (p: { memberId: string; sidc?: string; connected?: boolean }) => void;
-  room_closed: (p: { reason: 'expired' }) => void;
+  /** `expired` = GC ; `closed` = clôture admin ; `kicked` = exclusion admin de CE membre. */
+  room_closed: (p: { reason: 'expired' | 'closed' | 'kicked' }) => void;
   order: (o: OrderMessage) => void;
 }

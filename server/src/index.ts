@@ -9,6 +9,7 @@ import { registerHandlers } from './handlers';
 import { RoomManager } from './rooms';
 import { IpRateLimiter } from './rateLimit';
 import { createPersistence } from './persistence';
+import { createAdminRouter } from './admin';
 
 const PORT = Number(process.env.PORT ?? 3000);
 // DATA_DIR = volume persistant en prod (cf. fly.toml), dossier local en dev.
@@ -27,6 +28,15 @@ app.disable('x-powered-by');
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true, uptime: process.uptime() });
 });
+
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  // Doit dépasser MAX_ORDER_BYTES ; tout le reste est minuscule.
+  maxHttpBufferSize: MAX_ORDER_BYTES * 2,
+});
+
+// Console d'administration (montée AVANT le fallback SPA qui happe tout le reste).
+app.use('/admin', createAdminRouter(io, manager));
 
 if (existsSync(clientDist)) {
   app.use(
@@ -51,12 +61,6 @@ if (existsSync(clientDist)) {
     res.status(503).send('Client non construit : lancez `npm run build` (ou utilisez le serveur de dev Vite).');
   });
 }
-
-const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  // Doit dépasser MAX_ORDER_BYTES ; tout le reste est minuscule.
-  maxHttpBufferSize: MAX_ORDER_BYTES * 2,
-});
 
 const stopHandlers = registerHandlers(io, manager, new IpRateLimiter());
 

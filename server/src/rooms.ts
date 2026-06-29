@@ -57,6 +57,29 @@ export interface ManagerSnapshot {
   rooms: RoomSnapshot[];
 }
 
+/** Membre tel qu'affiché dans la console d'administration. */
+export interface MemberSummary {
+  id: string;
+  callsign: string;
+  isLeader: boolean;
+  connected: boolean;
+  lastSeen: number;
+}
+
+/** Room telle qu'affichée dans la console d'administration. */
+export interface RoomSummary {
+  code: string;
+  createdAt: number;
+  emptySince: number | null;
+  /** Instant d'expiration effectif (min de l'âge max et du TTL "vide"). */
+  expiresAt: number;
+  expiresInMs: number;
+  memberCount: number;
+  connectedCount: number;
+  orderCount: number;
+  members: MemberSummary[];
+}
+
 export type Result<T> = ({ ok: true } & T) | { ok: false; error: ErrorCode };
 
 /**
@@ -188,6 +211,70 @@ export class RoomManager {
       }
     }
     return events;
+  }
+
+  // --- Administration (cf. admin.ts) ---------------------------------------
+
+  /** Clôture immédiate d'une room (l'émission des événements incombe à l'appelant). */
+  closeRoom(code: string): boolean {
+    return this.rooms.delete(code);
+  }
+
+  /**
+   * Rallonge la durée de vie d'une room : on remet `createdAt` à maintenant
+   * (nouvelle fenêtre ROOM_MAX_AGE_MS) et, si la room est vide, on redémarre le
+   * compte à rebours "vide" (emptySince=now) — sinon il resterait figé loin dans
+   * le passé et la room serait GC malgré l'extension.
+   */
+  extendRoom(code: string, now = Date.now()): boolean {
+    const room = this.rooms.get(code);
+    if (!room) return false;
+    room.createdAt = now;
+    const hasConnected = [...room.members.values()].some((m) => m.connected);
+    room.emptySince = hasConnected ? null : now;
+    return true;
+  }
+
+  /**
+   * Exclut un membre. Renvoie le membre retiré (avec son socketId, pour que
+   * l'appelant déconnecte le socket) ou null. La room reste ouverte.
+   */
+  kickMember(code: string, memberId: string, now = Date.now()): Member | null {
+    const room = this.rooms.get(code);
+    const member = room?.members.get(memberId);
+    if (!room || !member) return null;
+    room.members.delete(memberId);
+    this.refreshEmptySince(room, now);
+    return member;
+  }
+
+  /** Vue synthétique de toutes les rooms pour la console d'administration. */
+  summarize(now = Date.now()): RoomSummary[] {
+    return [...this.rooms.values()].map((room) => {
+      const members = [...room.members.values()];
+      const ageExpiresAt = room.createdAt + ROOM_MAX_AGE_MS;
+      const emptyExpiresAt = room.emptySince === null ? null : room.emptySince + ROOM_EMPTY_TTL_MS;
+      const expiresAt = emptyExpiresAt === null ? ageExpiresAt : Math.min(ageExpiresAt, emptyExpiresAt);
+      return {
+        code: room.code,
+        createdAt: room.createdAt,
+        emptySince: room.emptySince,
+        expiresAt,
+        expiresInMs: Math.max(0, expiresAt - now),
+        memberCount: members.length,
+        connectedCount: members.filter((m) => m.connected).length,
+        orderCount: room.recentOrders.length,
+        members: members
+          .map((m) => ({
+            id: m.id,
+            callsign: m.callsign,
+            isLeader: m.isLeader,
+            connected: m.connected,
+            lastSeen: m.lastSeen,
+          }))
+          .sort((a, b) => Number(b.isLeader) - Number(a.isLeader) || a.callsign.localeCompare(b.callsign)),
+      };
+    }).sort((a, b) => b.createdAt - a.createdAt);
   }
 
   /** Photo sérialisable de toutes les rooms, pour la persistance disque. */

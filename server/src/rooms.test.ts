@@ -146,3 +146,60 @@ describe('throttle des positions', () => {
     expect(member.lastPosition?.ts).toBe(T0 + 1000);
   });
 });
+
+describe('administration', () => {
+  it('closeRoom supprime la room et signale l’absence', () => {
+    const manager = new RoomManager();
+    const { room } = createdRoom(manager);
+    expect(manager.closeRoom(room.code)).toBe(true);
+    expect(manager.rooms.has(room.code)).toBe(false);
+    expect(manager.closeRoom(room.code)).toBe(false);
+  });
+
+  it('extendRoom remet createdAt à maintenant et repousse l’expiration', () => {
+    const manager = new RoomManager();
+    const { room } = createdRoom(manager);
+    const later = T0 + ROOM_MAX_AGE_MS - 1000;
+    expect(manager.extendRoom(room.code, later)).toBe(true);
+    expect(room.createdAt).toBe(later);
+    // Occupée par un membre connecté → pas en compte à rebours "vide".
+    expect(room.emptySince).toBeNull();
+    expect(manager.extendRoom('ZZZZZ', later)).toBe(false);
+  });
+
+  it('extendRoom redémarre le compte à rebours "vide" si la room est vide', () => {
+    const manager = new RoomManager();
+    const { room, member } = createdRoom(manager);
+    manager.markDisconnected(room.code, member.id, T0);
+    const later = T0 + 10_000;
+    manager.extendRoom(room.code, later);
+    expect(room.emptySince).toBe(later);
+  });
+
+  it('kickMember retire le membre et renvoie son socketId', () => {
+    const manager = new RoomManager();
+    const { room } = createdRoom(manager);
+    const joined = manager.joinRoom(room.code, 'Bravo 2', SIDC, 'sock-b2', T0);
+    if (isErr(joined)) throw new Error(joined.error);
+    const removed = manager.kickMember(room.code, joined.member.id);
+    expect(removed?.socketId).toBe('sock-b2');
+    expect(room.members.has(joined.member.id)).toBe(false);
+    expect(manager.kickMember(room.code, joined.member.id)).toBeNull();
+  });
+
+  it('summarize expose les rooms, l’effectif connecté et l’expiration', () => {
+    const manager = new RoomManager();
+    const { room, member } = createdRoom(manager);
+    const joined = manager.joinRoom(room.code, 'Bravo 2', SIDC, 'sock-b2', T0);
+    if (isErr(joined)) throw new Error(joined.error);
+    manager.markDisconnected(room.code, joined.member.id, T0);
+    const summary = manager.summarize(T0)[0]!;
+    expect(summary.code).toBe(room.code);
+    expect(summary.memberCount).toBe(2);
+    expect(summary.connectedCount).toBe(1);
+    expect(summary.expiresAt).toBe(room.createdAt + ROOM_MAX_AGE_MS);
+    // Le chef remonte en tête de liste.
+    expect(summary.members[0]!.id).toBe(member.id);
+    expect(summary.members[0]!.isLeader).toBe(true);
+  });
+});

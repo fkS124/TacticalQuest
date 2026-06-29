@@ -84,9 +84,13 @@ socket.on('order', (o) => {
   bus.emit('orders');
 });
 
-socket.on('room_closed', () => {
+socket.on('room_closed', ({ reason }) => {
   clearSession();
-  bus.emit('session-lost', 'La salle a expiré.');
+  const msg =
+    reason === 'kicked' ? 'Tu as été exclu de la salle.'
+    : reason === 'closed' ? 'La salle a été fermée par l’administrateur.'
+    : 'La salle a expiré.';
+  bus.emit('session-lost', msg);
 });
 
 // --- cycle de connexion ---

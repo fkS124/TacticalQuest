@@ -56,6 +56,8 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET') return;
   if (url.pathname.startsWith('/socket.io/')) return;
+  // Console d'admin : toujours servie en direct, jamais cachée (hors PWA).
+  if (url.pathname.startsWith('/admin')) return;
 
   if (TILE_HOSTS.includes(url.hostname)) {
     event.respondWith(tileStrategy(event.request));

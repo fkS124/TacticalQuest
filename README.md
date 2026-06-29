@@ -80,6 +80,29 @@ Géolocalisation et service worker exigent HTTPS. Utiliser Caddy devant le port
   sinon ni la géolocalisation ni le service worker ne fonctionneront.
   Alternative : `mkcert -install` + certificat pour l'IP LAN.
 
+### Console d'administration
+
+Une page `/admin` permet de lister les salles actives, les **terminer**, les
+**rallonger** (24 h) et **exclure** un membre. Elle est protégée par un code
+dont seul le **hash sha256** vit côté serveur, dans le secret `ADMIN_CODE_HASH` :
+
+```bash
+# Calculer le hash d'un code (ou en générer un aléatoire sans argument) :
+node scripts/admin-hash.mjs "mon-code-secret"
+
+# En production (Fly) :
+fly secrets set ADMIN_CODE_HASH=<hash>
+# En local :
+ADMIN_CODE_HASH=<hash> npm start
+```
+
+Sans ce secret, toute la zone `/admin` renvoie 503 (désactivée). Le code saisi
+sur la page n'est jamais stocké côté serveur ; il transite en
+`Authorization: Bearer` sur chaque appel (donc **HTTPS obligatoire**) et est
+comparé au hash à temps constant. La page est servie hors du build PWA (le
+service worker ignore `/admin`). Terminer une salle ou exclure un membre renvoie
+les clients concernés à l'accueil (`room_closed` `closed`/`kicked`).
+
 ## Architecture
 
 ```
