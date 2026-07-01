@@ -2,6 +2,7 @@ import L from 'leaflet';
 import '../map/rotate'; // expose `L` au global (doit précéder leaflet-rotate)
 import 'leaflet-rotate'; // patche L.Map avec setBearing()
 import { startCompass, type CompassStop } from '../map/compass';
+import { Protractor } from '../map/protractor';
 import { POSITION_INTERVAL_MS } from '@tq/shared/constants';
 import type { GraphicStyle, LineEchelon, MemberPublic, Position } from '@tq/shared/protocol';
 import { bus, state } from '../state';
@@ -13,8 +14,9 @@ import { dlog, formatLog, clearLog, onLog } from '../debugLog';
 import { createBaseLayers, DEFAULT_LAYER } from '../map/layers';
 import { MarkerLayer } from '../map/markers';
 import { OrdersLayer } from '../map/orders';
+import type { WaypointOrder } from '../map/orderFilter';
 import { PolylineSketch } from '../map/sketch';
-import { HOSTILE_SIDC, symbolSvg } from '../map/symbols';
+import { HOSTILE_SIDC, roleFigure, roleDesignation } from '../map/symbols';
 import {
   checkIncomingMessages,
   closeComms,
@@ -39,11 +41,12 @@ let busWired = false;
 // Boussole : si actif, fonction d'arrêt de l'écoute ; bearing courant appliqué.
 let compassStop: CompassStop | null = null;
 let compassBearing = 0;
+// Rapporteur (cercle trigo) : instancié à la création de la carte.
+let protractor: Protractor | null = null;
 
-// 'arrow' reste un mode valide (retiré de l'affichage, voir index.html) ;
-// les outils réellement présentés sont listés dans DISPLAYED_TOOLS.
+// Outils d'esquisse présentés (chacun a un bouton #tool-<mode>).
 type SketchMode = 'measure' | 'line' | 'arrow' | 'polygon';
-const DISPLAYED_TOOLS = ['measure', 'line', 'polygon'] as const;
+const DISPLAYED_TOOLS = ['measure', 'line', 'arrow', 'polygon'] as const;
 let sketch: PolylineSketch | null = null;
 let sketchMode: SketchMode = 'measure';
 let sketchColor = '#e8d44d';
@@ -57,6 +60,9 @@ let pendingPoint: L.LatLng | null = null;
 let pointColor = '#e8d44d';
 // Plot ENI (losange rouge) en attente de texte.
 let pendingEni: L.LatLng | null = null;
+// Id de l'ordre en cours d'édition (menu point/ENI rouvert) : la validation
+// réémet le même id (donc écrase le plot) au lieu d'en créer un nouveau.
+let editId: string | null = null;
 
 export function enterMap(): void {
   const session = state.session;
@@ -126,6 +132,14 @@ function stopCompass(): void {
   $('tool-compass').classList.remove('active');
   compassBearing = 0;
   map?.setBearing(0);
+  protractor?.update(); // réaligne l'anneau sur le nord (bearing 0)
+}
+
+// --- rapporteur (cercle trigo) : relevé d'azimut ---
+
+function toggleProtractor(): void {
+  if (!protractor) return;
+  $('tool-protractor').classList.toggle('active', protractor.toggle());
 }
 
 /** Cap boussole → rotation carte (cap en haut). Seuil pour éviter de tourner à
@@ -137,10 +151,13 @@ function applyHeading(heading: number): void {
   if (Math.abs(delta) < 1.5) return;
   compassBearing = target;
   map.setBearing(target);
+  protractor?.update(); // garde l'anneau aligné sur le nord pendant la rotation
 }
 
 function exitToHome(message?: string): void {
   stopCompass();
+  protractor?.disable();
+  $('tool-protractor').classList.remove('active');
   cancelSketch();
   closeComms();
   resetCommsNotifications();
@@ -188,15 +205,22 @@ function initLeaflet(): void {
   window.addEventListener('resize', () => map?.invalidateSize());
   window.addEventListener('orientationchange', () => setTimeout(() => map?.invalidateSize(), 200));
 
+  protractor = new Protractor(map, $('protractor'), $('protractor-readout'));
+
   const callsignOf = (id: string): string =>
     state.members.get(id)?.callsign ??
     (id === state.session?.memberId ? state.session.callsign : 'inconnu');
 
   ordersLayer = new OrdersLayer(map, {
-    // Tous les membres ont les mêmes droits : chacun peut effacer un tracé/plot.
+    // Tous les membres ont les mêmes droits : chacun peut effacer/modifier un tracé/plot.
     canDelete: () => true,
     onDelete: (orderId) => void deleteOrder(orderId),
+    onEdit: (w) => editPlot(w),
     authorName: callsignOf,
+    selfLatLng: () => {
+      const p = state.session && state.members.get(state.session.memberId)?.lastPosition;
+      return p ? [p.lat, p.lng] : null;
+    },
     isSketching: () => sketch !== null,
   });
 }
@@ -253,7 +277,7 @@ function onOwnFix(p: Position): void {
     me = {
       id: session.memberId,
       callsign: session.callsign,
-      sidc: session.sidc,
+      role: session.role,
       isLeader: session.isLeader,
       connected: true,
       lastSeen: Date.now(),
@@ -455,6 +479,7 @@ function closeBoxMenu(): void {
 function beginPoint(): void {
   if (!map || !state.session) return;
   cancelSketch();
+  editId = null; // création, pas édition
   pendingPoint = map.getCenter();
   const input = $<HTMLInputElement>('point-name');
   input.value = '';
@@ -467,7 +492,7 @@ function confirmPointMenu(): void {
   const name = $<HTMLInputElement>('point-name').value.trim() || 'Point';
   const c = pendingPoint;
   sendOrder({
-    id: uid(),
+    id: editId ?? uid(), // même id en édition → écrase le plot
     authorId: state.session.memberId,
     ts: Date.now(),
     kind: 'waypoint',
@@ -479,6 +504,7 @@ function confirmPointMenu(): void {
 function closePointMenu(): void {
   $('point-menu').hidden = true;
   pendingPoint = null;
+  editId = null;
 }
 
 function deleteOrder(orderId: string): void {
@@ -498,6 +524,7 @@ function deleteOrder(orderId: string): void {
 function beginEni(): void {
   if (!map || !state.session) return;
   cancelSketch(); // un plot ENI interrompt une éventuelle esquisse en cours
+  editId = null; // création, pas édition
   pendingEni = map.getCenter();
   const input = $<HTMLInputElement>('eni-name');
   input.value = '';
@@ -510,7 +537,7 @@ function confirmEniMenu(): void {
   const name = $<HTMLInputElement>('eni-name').value.trim() || 'ENI';
   const c = pendingEni;
   sendOrder({
-    id: uid(),
+    id: editId ?? uid(), // même id en édition → écrase le plot
     authorId: state.session.memberId,
     ts: Date.now(),
     kind: 'waypoint',
@@ -522,6 +549,37 @@ function confirmEniMenu(): void {
 function closeEniMenu(): void {
   $('eni-menu').hidden = true;
   pendingEni = null;
+  editId = null;
+}
+
+/**
+ * Rééditer un plot : rouvre le menu adéquat (point nommé si `color`, sinon ENI)
+ * prérempli, en conservant la position d'origine ; la validation réémet l'ordre
+ * avec le même id (cf. `editId`), écrasant le plot chez tout le monde.
+ */
+function editPlot(w: WaypointOrder): void {
+  if (!map || !state.session) return;
+  cancelSketch();
+  closePointMenu();
+  closeEniMenu();
+  editId = w.id;
+  if (w.color != null) {
+    pendingPoint = L.latLng(w.lat, w.lng);
+    pointColor = w.color;
+    document.querySelectorAll<HTMLElement>('#point-colors .color-dot').forEach((el) => {
+      el.classList.toggle('selected', el.dataset.color === w.color);
+    });
+    const input = $<HTMLInputElement>('point-name');
+    input.value = w.name;
+    $('point-menu').hidden = false;
+    input.focus();
+  } else {
+    pendingEni = L.latLng(w.lat, w.lng);
+    const input = $<HTMLInputElement>('eni-name');
+    input.value = w.name;
+    $('eni-menu').hidden = false;
+    input.focus();
+  }
 }
 
 // --- coordonnées (réticule central + popups) ---
@@ -558,10 +616,16 @@ function scheduleElevation(lat: number, lng: number): void {
 
 function openCoordSearch(): void {
   const input = $<HTMLInputElement>('coord-search-input');
-  input.value = '';
+  // Préremplissage avec la position actuelle (mon fix GPS, sinon le centre carte)
+  // dans un format relisible par parseCoords : l'UTM n'étant pas parsé, on le
+  // rabat sur MGRS.
+  const here = geo?.getLastFix() ?? map?.getCenter() ?? null;
+  const fmt = getCoordFormat();
+  input.value = here ? formatCoords(here.lat, here.lng, fmt === 'utm' ? 'mgrs' : fmt) : '';
   $('coord-search-error').hidden = true;
   $('coord-search-menu').hidden = false;
   input.focus();
+  input.select(); // sélection : on tape par-dessus, ou on ajuste
 }
 
 function confirmCoordSearch(): void {
@@ -593,7 +657,7 @@ function openMemberPopup(m: MemberPublic): void {
   const div = document.createElement('div');
   div.className = 'order-popup';
   div.innerHTML =
-    `<b>${escapeHtml(m.callsign)}${LEADER_TAG(m.isLeader)}</b>` +
+    `<b>${escapeHtml(m.callsign)}${DESIG_TAG(m.role)}</b>` +
     coordsWithAltitudeHtml(p.lat, p.lng) +
     `<span class="order-author">±${Math.round(p.accuracy)} m · ${memberMeta(m, Date.now())}</span>`;
   hydrateAltitudes(div);
@@ -611,8 +675,12 @@ function renderConn(): void {
     : 'Hors ligne';
 }
 
-const LEADER_TAG = (isLeader: boolean): string =>
-  isLeader ? '<span class="leader-tag">CHEF</span>' : '';
+// Pastille de désignation (10 / 22 / 22A) affichée à côté de l'indicatif ;
+// vide pour le CDU et les GV.
+const DESIG_TAG = (role: string): string => {
+  const d = roleDesignation(role);
+  return d ? `<span class="ent-tag">${d}</span>` : '';
+};
 
 function renderTopbar(): void {
   const connected = [...state.members.values()].filter((m) => m.connected).length;
@@ -638,16 +706,14 @@ function renderDrawer(): void {
   const list = $('member-list');
   list.innerHTML = '';
   const now = Date.now();
-  const sorted = [...state.members.values()].sort((a, b) =>
-    a.isLeader !== b.isLeader ? (a.isLeader ? -1 : 1) : a.callsign.localeCompare(b.callsign),
-  );
+  const sorted = [...state.members.values()].sort((a, b) => a.callsign.localeCompare(b.callsign));
   for (const m of sorted) {
     const li = document.createElement('li');
     if (!m.connected) li.classList.add('offline');
     const meta = memberMeta(m, now);
     li.innerHTML =
-      `<span class="m-symbol">${symbolSvg(m.sidc, 18)}</span>` +
-      `<span class="m-callsign">${escapeHtml(m.callsign)}${LEADER_TAG(m.isLeader)}</span>` +
+      `<span class="m-symbol">${roleFigure(m.role, 18)}</span>` +
+      `<span class="m-callsign">${escapeHtml(m.callsign)}${DESIG_TAG(m.role)}</span>` +
       `<span class="m-meta">${meta}</span>`;
     if (m.lastPosition) {
       const btn = document.createElement('button');
@@ -698,6 +764,7 @@ export function initMapView(): void {
   $('eni-ok').addEventListener('click', confirmEniMenu);
   $('eni-cancel').addEventListener('click', closeEniMenu);
   $('tool-compass').addEventListener('click', () => void toggleCompass());
+  $('tool-protractor').addEventListener('click', toggleProtractor);
   $('sketch-add').addEventListener('click', () => sketch?.addVertexAtCenter());
 
   // Recherche de coordonnées (loupe) : saisie MGRS / lat-lng puis « Y aller ».
@@ -785,6 +852,7 @@ export function initMapView(): void {
 
   $('btn-locate').addEventListener('click', () => {
     setFollow(true);
+    geo?.refresh(); // acquisition GPS fraîche ; onOwnFix recentrera en mode suivi
     const fix = geo?.getLastFix();
     if (fix) map?.setView([fix.lat, fix.lng], Math.max(map.getZoom(), 15));
   });

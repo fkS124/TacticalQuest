@@ -24,6 +24,8 @@ let deps: Deps;
 // Messages déjà vus (pour ne notifier qu'une fois) et compteur de non-lus.
 const seen = new Set<string>();
 let unread = 0;
+// Messages dont la liste des « lu par » est dépliée (état UI local).
+const expandedLikers = new Set<string>();
 
 export function initCommsPanel(d: Deps): void {
   deps = d;
@@ -37,6 +39,19 @@ export function initCommsPanel(d: Deps): void {
       sendChat();
     }
   });
+  // Délégation : « lu / j'aime » (cm-like) et dépliage des lecteurs (cm-count).
+  $('comms-messages').addEventListener('click', (e) => {
+    const el = e.target as HTMLElement;
+    const like = el.closest<HTMLElement>('.cm-like');
+    if (like?.dataset.id) return markRead(like.dataset.id);
+    const count = el.closest<HTMLElement>('.cm-count');
+    if (count?.dataset.id) {
+      const id = count.dataset.id;
+      if (expandedLikers.has(id)) expandedLikers.delete(id);
+      else expandedLikers.add(id);
+      renderComms();
+    }
+  });
 }
 
 function deriveMessages(): ChatMessage[] {
@@ -47,6 +62,36 @@ function deriveMessages(): ChatMessage[] {
   }
   out.sort((a, b) => a.ts - b.ts); // ordre chronologique (chat)
   return out;
+}
+
+/**
+ * Accusés de lecture (« likes ») : ordres `ack` référençant l'id d'un message.
+ * Renvoie, par id de message, l'ensemble des membres l'ayant marqué lu. Relayés
+ * et persistés comme tout ordre, donc reconstruits tels quels à la reconnexion.
+ */
+function deriveAcks(): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>();
+  for (const o of state.orders.values()) {
+    if (o.payload.kind !== 'ack') continue;
+    const set = map.get(o.payload.orderId) ?? new Set<string>();
+    set.add(o.authorId);
+    map.set(o.payload.orderId, set);
+  }
+  return map;
+}
+
+/** Marque un message comme lu (idempotent : un seul ack par membre et message). */
+function markRead(orderId: string): void {
+  const session = state.session;
+  if (!session) return;
+  if (deriveAcks().get(orderId)?.has(session.memberId)) return;
+  sendOrder({
+    id: uid(),
+    authorId: session.memberId,
+    ts: Date.now(),
+    kind: 'ack',
+    payload: { kind: 'ack', orderId },
+  });
 }
 
 export function toggleComms(): void {
@@ -140,20 +185,43 @@ export function renderComms(): void {
     return;
   }
   const me = state.session?.memberId;
+  const acks = deriveAcks();
   for (const m of messages) {
     seen.add(m.id);
-    list.appendChild(messageItem(m, m.authorId === me));
+    list.appendChild(messageItem(m, m.authorId === me, acks.get(m.id) ?? new Set()));
   }
   if (wasAtBottom) scrollToBottom();
 }
 
-function messageItem(m: ChatMessage, mine: boolean): HTMLLIElement {
+// Coche « lu / j'aime ».
+const CHECK_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9 17.5 20 6.5"/></svg>';
+
+function messageItem(m: ChatMessage, mine: boolean, likers: Set<string>): HTMLLIElement {
   const li = document.createElement('li');
   li.className = `comms-msg${mine ? ' mine' : ''}`;
+  const me = state.session?.memberId;
+  const likedByMe = !!me && likers.has(me);
+  const count = likers.size;
+
+  // Sur mes propres messages : pas de bouton (je ne me lis pas), mais je vois
+  // qui a lu. Sur ceux des autres : bouton « lu » (accusé de lecture).
+  const likeBtn = mine
+    ? ''
+    : `<button class="cm-like${likedByMe ? ' liked' : ''}" data-id="${m.id}" title="Marquer comme lu" aria-label="Marquer comme lu">${CHECK_SVG}</button>`;
+  const countBtn = count ? `<button class="cm-count" data-id="${m.id}" title="Qui a lu">${CHECK_SVG} ${count}</button>` : '';
+  const react = likeBtn || countBtn ? `<div class="cm-react">${likeBtn}${countBtn}</div>` : '';
+  const likersList =
+    expandedLikers.has(m.id) && count
+      ? `<ul class="cm-likers">${[...likers].map((a) => `<li>${escapeHtml(callsign(a))}</li>`).join('')}</ul>`
+      : '';
+
   li.innerHTML =
     `<span class="cm-head"><b>${escapeHtml(callsign(m.authorId))}</b>` +
     `<span class="cm-time">${time(m.ts)}</span></span>` +
-    `<span class="cm-body">${escapeHtml(m.body)}</span>`;
+    `<span class="cm-body">${escapeHtml(m.body)}</span>` +
+    react +
+    likersList;
   return li;
 }
 
@@ -195,6 +263,7 @@ export function checkIncomingMessages(): void {
 export function resetCommsNotifications(): void {
   seen.clear();
   unread = 0;
+  expandedLikers.clear();
 }
 
 // --- utilitaires ---

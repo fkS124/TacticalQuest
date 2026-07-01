@@ -48,6 +48,11 @@ function midpointAlong(pts: [number, number][]): MidPoint | null {
   return { at: pts[0]!, a: pts[0]!, b: pts[1]! };
 }
 
+/** Un plot édité (même id) a-t-il changé de position, nom, couleur ou figuré ? */
+function plotChanged(a: WaypointOrder, b: WaypointOrder): boolean {
+  return a.lat !== b.lat || a.lng !== b.lng || a.name !== b.name || a.color !== b.color || a.sidc !== b.sidc;
+}
+
 /** Icône d'un point nommé : rond coloré (cliquable, 16×16) + libellé à droite. */
 function pointIcon(color: string, name: string): L.DivIcon {
   return L.divIcon({
@@ -71,7 +76,7 @@ type Rendered =
       /** Figuré d'échelon au centre de la ligne (ancré en géographique). */
       echelon: L.Marker | null;
     }
-  | { kind: 'plot'; marker: L.Marker };
+  | { kind: 'plot'; marker: L.Marker; w: WaypointOrder };
 
 /** Glyphes d'échelon (limite inter-unités), colorés via `currentColor`. */
 const ECHELON_GLYPH: Record<LineEchelon, string> = {
@@ -84,7 +89,11 @@ export interface OrdersLayerCallbacks {
   /** Peut-on supprimer cet élément ? (chef ou auteur) */
   canDelete: (authorId: string) => boolean;
   onDelete: (orderId: string) => void;
+  /** Rééditer un plot (ENI / point nommé) : rouvre le menu prérempli. */
+  onEdit: (w: WaypointOrder) => void;
   authorName: (authorId: string) => string;
+  /** Ma position courante, pour afficher la distance jusqu'à un plot. */
+  selfLatLng: () => [number, number] | null;
   /** Vrai pendant une esquisse : ne pas ouvrir de popup sous le doigt. */
   isSketching: () => boolean;
 }
@@ -112,7 +121,14 @@ export class OrdersLayer {
       if (!this.rendered.has(g.id)) this.renderGraphic(g);
     }
     for (const w of plots.values()) {
-      if (!this.rendered.has(w.id)) this.renderPlot(w);
+      const cur = this.rendered.get(w.id);
+      // Nouveau plot, ou plot édité (même id, contenu changé) → (re)dessiner.
+      if (!cur) {
+        this.renderPlot(w);
+      } else if (cur.kind === 'plot' && plotChanged(cur.w, w)) {
+        this.removeRendered(cur);
+        this.renderPlot(w);
+      }
     }
   }
 
@@ -227,12 +243,16 @@ export class OrdersLayer {
     marker.on('click', (e) => {
       if (this.cb.isSketching()) return;
       L.DomEvent.stop(e);
-      const title =
-        `<b>${escapeHtml(w.name)}</b>` +
-        coordsWithAltitudeHtml(w.lat, w.lng);
-      this.openPopup(w.id, w.authorId, title, e.latlng);
+      const self = this.cb.selfLatLng();
+      const dist = self
+        ? `<span class="order-dist">à ${formatDistance(
+            distanceM({ lat: self[0], lng: self[1] }, { lat: w.lat, lng: w.lng }),
+          )} de vous</span>`
+        : '';
+      const title = `<b>${escapeHtml(w.name)}</b>` + coordsWithAltitudeHtml(w.lat, w.lng) + dist;
+      this.openPopup(w.id, w.authorId, title, e.latlng, () => this.cb.onEdit(w));
     });
-    this.rendered.set(w.id, { kind: 'plot', marker });
+    this.rendered.set(w.id, { kind: 'plot', marker, w });
   }
 
   /** Pointe en bout de ligne. Taille constante à l'écran (d'où le recalcul
@@ -296,21 +316,40 @@ export class OrdersLayer {
     this.openPopup(g.id, g.authorId, title, at);
   }
 
-  private openPopup(orderId: string, authorId: string, titleHtml: string, at: L.LatLng): void {
+  private openPopup(
+    orderId: string,
+    authorId: string,
+    titleHtml: string,
+    at: L.LatLng,
+    onEdit?: () => void,
+  ): void {
     const div = document.createElement('div');
     div.className = 'order-popup';
     div.innerHTML =
       `${titleHtml}<br>` +
       `<span class="order-author">par ${escapeHtml(this.cb.authorName(authorId))}</span>`;
     if (this.cb.canDelete(authorId)) {
-      const btn = document.createElement('button');
-      btn.className = 'btn order-delete';
-      btn.textContent = 'Supprimer';
-      btn.addEventListener('click', () => {
+      const actions = document.createElement('div');
+      actions.className = 'order-actions';
+      if (onEdit) {
+        const edit = document.createElement('button');
+        edit.className = 'btn';
+        edit.textContent = 'Modifier';
+        edit.addEventListener('click', () => {
+          this.map.closePopup();
+          onEdit();
+        });
+        actions.appendChild(edit);
+      }
+      const del = document.createElement('button');
+      del.className = 'btn order-delete';
+      del.textContent = 'Supprimer';
+      del.addEventListener('click', () => {
         this.map.closePopup();
         this.cb.onDelete(orderId);
       });
-      div.appendChild(btn);
+      actions.appendChild(del);
+      div.appendChild(actions);
     }
     hydrateAltitudes(div); // remplit l'altitude des coordonnées présentes
     L.popup({ closeButton: true, className: 'tq-popup' }).setLatLng(at).setContent(div).openOn(this.map);

@@ -8,11 +8,13 @@ import {
 } from '@tq/shared/constants';
 import { isErr, RoomManager } from './rooms';
 
-const SIDC = 'SFGPUCI----';
+// Rôle par défaut des helpers : GV, non contraint par l'unicité des postes, pour
+// que plusieurs membres puissent coexister sans conflit dans les tests génériques.
+const ROLE = 'GV';
 const T0 = 1_000_000;
 
 function createdRoom(manager: RoomManager, now = T0) {
-  const res = manager.createRoom('Alpha 1', SIDC, 'sock-leader', now);
+  const res = manager.createRoom('Alpha 1', ROLE, 'sock-leader', now);
   if (isErr(res)) throw new Error(res.error);
   return res;
 }
@@ -32,14 +34,14 @@ describe('génération des codes', () => {
 describe('join', () => {
   it('rejette un code inconnu', () => {
     const manager = new RoomManager();
-    const res = manager.joinRoom('ZZZZZZ', 'Bravo 2', SIDC, 's2', T0);
+    const res = manager.joinRoom('ZZZZZZ', 'Bravo 2', ROLE, 's2', T0);
     expect(res).toEqual({ ok: false, error: 'ROOM_NOT_FOUND' });
   });
 
   it('rejette un indicatif tenu par un membre connecté', () => {
     const manager = new RoomManager();
     const { room } = createdRoom(manager);
-    const res = manager.joinRoom(room.code, 'alpha 1', SIDC, 's2', T0);
+    const res = manager.joinRoom(room.code, 'alpha 1', ROLE, 's2', T0);
     expect(res).toEqual({ ok: false, error: 'CALLSIGN_TAKEN' });
   });
 
@@ -47,7 +49,7 @@ describe('join', () => {
     const manager = new RoomManager();
     const { room, member } = createdRoom(manager);
     manager.markDisconnected(room.code, member.id, T0 + 1000);
-    const res = manager.joinRoom(room.code, 'alpha 1', SIDC, 's2', T0 + 2000);
+    const res = manager.joinRoom(room.code, 'alpha 1', ROLE, 's2', T0 + 2000);
     expect(res).toEqual({ ok: false, error: 'CALLSIGN_TAKEN_DISCONNECTED' });
     expect(room.members.size).toBe(1); // le fantôme n'est pas touché
   });
@@ -56,7 +58,7 @@ describe('join', () => {
     const manager = new RoomManager();
     const { room, member } = createdRoom(manager);
     manager.markDisconnected(room.code, member.id, T0 + 1000);
-    const res = manager.joinRoom(room.code, 'Alpha 1', SIDC, 's2', T0 + 2000, true);
+    const res = manager.joinRoom(room.code, 'Alpha 1', ROLE, 's2', T0 + 2000, true);
     expect(res.ok).toBe(true);
     if (res.ok) {
       expect(res.replacedMemberId).toBe(member.id);
@@ -70,10 +72,56 @@ describe('join', () => {
   it('le créateur est chef, les suivants non', () => {
     const manager = new RoomManager();
     const { room, member: leader } = createdRoom(manager);
-    const res = manager.joinRoom(room.code, 'Bravo 2', SIDC, 's2', T0);
+    const res = manager.joinRoom(room.code, 'Bravo 2', ROLE, 's2', T0);
     expect(res.ok).toBe(true);
     expect(leader.isLeader).toBe(true);
     if (res.ok) expect(res.member.isLeader).toBe(false);
+  });
+});
+
+describe('unicité des postes', () => {
+  function roomWith(role: string) {
+    const manager = new RoomManager();
+    const res = manager.createRoom('Alpha 1', role, 'sock-leader', T0);
+    if (isErr(res)) throw new Error(res.error);
+    return { manager, ...res };
+  }
+
+  it('rejette un poste de commandement tenu par un membre connecté', () => {
+    const { manager, room } = roomWith('CDS:2');
+    const res = manager.joinRoom(room.code, 'Bravo 2', 'CDS:2', 's2', T0);
+    expect(res).toEqual({ ok: false, error: 'POST_TAKEN' });
+  });
+
+  it('signale (sans remplacer) un poste tenu par un membre déconnecté', () => {
+    const { manager, room, member } = roomWith('CDE:2:2:A');
+    manager.markDisconnected(room.code, member.id, T0 + 1000);
+    const res = manager.joinRoom(room.code, 'Bravo 2', 'CDE:2:2:A', 's2', T0 + 2000);
+    expect(res).toEqual({ ok: false, error: 'POST_TAKEN_DISCONNECTED' });
+    expect(room.members.size).toBe(1);
+  });
+
+  it('remplace un poste déconnecté quand replace=true (évince le fantôme)', () => {
+    const { manager, room, member } = roomWith('CDG:1:3');
+    manager.markDisconnected(room.code, member.id, T0 + 1000);
+    const res = manager.joinRoom(room.code, 'Bravo 2', 'CDG:1:3', 's2', T0 + 2000, true);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.replacedMemberId).toBe(member.id);
+    expect(room.members.size).toBe(1);
+    expect(room.members.has(member.id)).toBe(false);
+  });
+
+  it('autorise plusieurs GV (poste non contraint)', () => {
+    const { manager, room } = roomWith('GV');
+    const res = manager.joinRoom(room.code, 'Bravo 2', 'GV', 's2', T0);
+    expect(res.ok).toBe(true);
+    expect(room.members.size).toBe(2);
+  });
+
+  it('n’oppose pas les postes distincts', () => {
+    const { manager, room } = roomWith('CDS:1');
+    const res = manager.joinRoom(room.code, 'Bravo 2', 'CDS:2', 's2', T0);
+    expect(res.ok).toBe(true);
   });
 });
 
@@ -96,7 +144,7 @@ describe('rejoin et période de grâce', () => {
   it('supprime le membre après expiration de la grâce', () => {
     const manager = new RoomManager();
     const { room } = createdRoom(manager);
-    const joined = manager.joinRoom(room.code, 'Bravo 2', SIDC, 's2', T0);
+    const joined = manager.joinRoom(room.code, 'Bravo 2', ROLE, 's2', T0);
     if (!joined.ok) throw new Error('join failed');
     manager.markDisconnected(room.code, joined.member.id, T0);
 
@@ -121,7 +169,7 @@ describe('GC des rooms', () => {
     const manager = new RoomManager();
     const { room, member } = createdRoom(manager);
     manager.leave(room.code, member.id, T0);
-    const res = manager.joinRoom(room.code, 'Bravo 2', SIDC, 's2', T0 + 60_000);
+    const res = manager.joinRoom(room.code, 'Bravo 2', ROLE, 's2', T0 + 60_000);
     expect(res.ok).toBe(true);
     expect(room.emptySince).toBeNull();
   });
@@ -179,7 +227,7 @@ describe('administration', () => {
   it('kickMember retire le membre et renvoie son socketId', () => {
     const manager = new RoomManager();
     const { room } = createdRoom(manager);
-    const joined = manager.joinRoom(room.code, 'Bravo 2', SIDC, 'sock-b2', T0);
+    const joined = manager.joinRoom(room.code, 'Bravo 2', ROLE, 'sock-b2', T0);
     if (isErr(joined)) throw new Error(joined.error);
     const removed = manager.kickMember(room.code, joined.member.id);
     expect(removed?.socketId).toBe('sock-b2');
@@ -190,7 +238,7 @@ describe('administration', () => {
   it('summarize expose les rooms, l’effectif connecté et l’expiration', () => {
     const manager = new RoomManager();
     const { room, member } = createdRoom(manager);
-    const joined = manager.joinRoom(room.code, 'Bravo 2', SIDC, 'sock-b2', T0);
+    const joined = manager.joinRoom(room.code, 'Bravo 2', ROLE, 'sock-b2', T0);
     if (isErr(joined)) throw new Error(joined.error);
     manager.markDisconnected(room.code, joined.member.id, T0);
     const summary = manager.summarize(T0)[0]!;

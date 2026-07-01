@@ -9,9 +9,18 @@ export const MAX_MEMBERS_PER_ROOM = 40;
 
 export const CALLSIGN_REGEX = /^[\p{L}\p{N} _-]{1,16}$/u;
 // SIDC lettre (2525C, 10-15 car.) ou numérique (APP-6D, 20-30 chiffres).
-// Le serveur ne l'interprète pas, il borne juste le format.
+// Le serveur ne l'interprète pas, il borne juste le format. Toujours utilisé
+// pour valider le SIDC des plots ENI (cf. orders.ts, HOSTILE_SIDC).
 export const SIDC_REGEX = /^[A-Za-z0-9*-]{10,30}$/;
 export const DEFAULT_SIDC = 'SFGPE----------'; // CDS (rond, chef de section)
+
+// Rôle d'un membre dans l'arbre hiérarchique de commandement :
+//   CDU (unité) > CDS:S (section 1-3) > CDG:S:G (groupe 1-3) >
+//   CDE:S:G:T (équipe A/B) > GV (grenadier-voltigeur, non contraint).
+// Le client dérive de cette chaîne le figuré ET la désignation (10/22/22A).
+// Le serveur borne le format et impose l'unicité des postes (sauf GV).
+export const ROLE_REGEX = /^(CDU|GV|CDS:[1-3]|CDG:[1-3]:[1-3]|CDE:[1-3]:[1-3]:[AB])$/;
+export const DEFAULT_ROLE = 'CDS:1'; // section 10, choix par défaut
 
 export const ROOM_MAX_AGE_MS = 24 * 60 * 60_000;
 // Reconnexion : un membre déconnecté est conservé pendant la période de grâce

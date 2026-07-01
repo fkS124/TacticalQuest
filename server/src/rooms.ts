@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import {
+  DEFAULT_ROLE,
   DISCONNECT_GRACE_MS,
   MAX_MEMBERS_PER_ROOM,
   MAX_RECENT_ORDERS,
@@ -23,7 +24,8 @@ export interface Member {
   /** Secret de re-binding — jamais exposé dans MemberPublic. */
   sessionToken: string;
   callsign: string;
-  sidc: string;
+  /** Poste dans l'arbre de commandement (cf. ROLE_REGEX). */
+  role: string;
   isLeader: boolean;
   connected: boolean;
   lastSeen: number;
@@ -103,7 +105,7 @@ export interface SweepEvents {
 export class RoomManager {
   readonly rooms = new Map<string, Room>();
 
-  createRoom(callsign: string, sidc: string, socketId: string, now = Date.now()): Result<{ room: Room; member: Member }> {
+  createRoom(callsign: string, role: string, socketId: string, now = Date.now()): Result<{ room: Room; member: Member }> {
     if (this.rooms.size >= MAX_ROOMS) return { ok: false, error: 'SERVER_FULL' };
     const room: Room = {
       code: this.generateCode(),
@@ -113,34 +115,38 @@ export class RoomManager {
       recentOrders: [],
     };
     this.rooms.set(room.code, room);
-    const member = this.addMember(room, callsign, sidc, socketId, true, now);
+    const member = this.addMember(room, callsign, role, socketId, true, now);
     return { ok: true, room, member };
   }
 
   joinRoom(
     code: string,
     callsign: string,
-    sidc: string,
+    role: string,
     socketId: string,
     now = Date.now(),
     replace = false,
   ): Result<{ room: Room; member: Member; replacedMemberId?: string }> {
     const room = this.rooms.get(code);
     if (!room) return { ok: false, error: 'ROOM_NOT_FOUND' };
-    const existing = [...room.members.values()].find(
-      (m) => m.callsign.toLowerCase() === callsign.toLowerCase(),
-    );
+    // Deux clés d'unicité : l'indicatif (toujours) et le poste de commandement
+    // (sauf GV, non contraint). Un membre connecté tenant l'une ou l'autre bloque
+    // net ; un fantôme déconnecté est remplaçable sur confirmation explicite.
+    const members = [...room.members.values()];
+    const byCallsign = members.find((m) => m.callsign.toLowerCase() === callsign.toLowerCase());
+    const byRole = role === 'GV' ? undefined : members.find((m) => m.role === role);
+    if (byCallsign?.connected) return { ok: false, error: 'CALLSIGN_TAKEN' };
+    if (byRole?.connected) return { ok: false, error: 'POST_TAKEN' };
+    // À ce stade, byCallsign/byRole ne peuvent être que des fantômes déconnectés.
+    if (byRole && !replace) return { ok: false, error: 'POST_TAKEN_DISCONNECTED' };
+    if (byCallsign && !replace) return { ok: false, error: 'CALLSIGN_TAKEN_DISCONNECTED' };
     let replacedMemberId: string | undefined;
-    if (existing) {
-      // Connecté : indicatif réellement occupé, refus net.
-      if (existing.connected) return { ok: false, error: 'CALLSIGN_TAKEN' };
-      // Déconnecté : remplaçable, mais seulement sur confirmation explicite.
-      if (!replace) return { ok: false, error: 'CALLSIGN_TAKEN_DISCONNECTED' };
-      room.members.delete(existing.id); // évince le fantôme, libère une place
-      replacedMemberId = existing.id;
+    for (const ghost of new Set([byCallsign, byRole].filter((m): m is Member => m != null))) {
+      room.members.delete(ghost.id); // évince le fantôme, libère une place
+      replacedMemberId = ghost.id;
     }
     if (room.members.size >= MAX_MEMBERS_PER_ROOM) return { ok: false, error: 'ROOM_FULL' };
-    const member = this.addMember(room, callsign, sidc, socketId, false, now);
+    const member = this.addMember(room, callsign, role, socketId, false, now);
     return { ok: true, room, member, replacedMemberId };
   }
 
@@ -305,7 +311,9 @@ export class RoomManager {
     for (const rs of snap.rooms) {
       const members = new Map<string, Member>();
       for (const m of rs.members ?? []) {
-        members.set(m.id, { ...m, connected: false, socketId: null });
+        // Repli pour les snapshots antérieurs à la refonte des rôles (champ `sidc`).
+        const role = m.role ?? DEFAULT_ROLE;
+        members.set(m.id, { ...m, role, connected: false, socketId: null });
       }
       const room: Room = {
         code: rs.code,
@@ -324,7 +332,7 @@ export class RoomManager {
     return {
       id: m.id,
       callsign: m.callsign,
-      sidc: m.sidc,
+      role: m.role,
       isLeader: m.isLeader,
       connected: m.connected,
       lastSeen: m.lastSeen,
@@ -343,7 +351,7 @@ export class RoomManager {
   private addMember(
     room: Room,
     callsign: string,
-    sidc: string,
+    role: string,
     socketId: string,
     isLeader: boolean,
     now: number,
@@ -352,7 +360,7 @@ export class RoomManager {
       id: randomUUID(),
       sessionToken: randomBytes(16).toString('hex'),
       callsign,
-      sidc,
+      role,
       isLeader,
       connected: true,
       lastSeen: now,

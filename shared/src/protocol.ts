@@ -17,8 +17,9 @@ export interface Position {
 export interface MemberPublic {
   id: string;
   callsign: string;
-  /** Code symbole APP-6 / 2525C (milsymbol). */
-  sidc: string;
+  /** Poste dans l'arbre de commandement (cf. ROLE_REGEX) ; le client en dérive
+   *  le figuré et la désignation (10/22/22A). */
+  role: string;
   isLeader: boolean;
   connected: boolean;
   /** Dernière activité vue par le serveur (epoch ms serveur). */
@@ -86,6 +87,10 @@ export type ErrorCode =
   | 'CALLSIGN_TAKEN'
   /** Indicatif tenu par un membre déconnecté : remplaçable via join_room { replace: true }. */
   | 'CALLSIGN_TAKEN_DISCONNECTED'
+  /** Poste de commandement déjà occupé par un membre connecté. */
+  | 'POST_TAKEN'
+  /** Poste tenu par un membre déconnecté : remplaçable via join_room { replace: true }. */
+  | 'POST_TAKEN_DISCONNECTED'
   | 'ROOM_FULL'
   | 'SERVER_FULL'
   | 'SESSION_INVALID'
@@ -111,11 +116,11 @@ export interface JoinedRoom {
 
 export interface ClientToServerEvents {
   create_room: (
-    p: { callsign: string; sidc: string },
+    p: { callsign: string; role: string },
     ack: (res: Ack<JoinedRoom>) => void,
   ) => void;
   join_room: (
-    p: { roomCode: string; callsign: string; sidc: string; replace?: boolean },
+    p: { roomCode: string; callsign: string; role: string; replace?: boolean },
     ack: (res: Ack<JoinedRoom>) => void,
   ) => void;
   rejoin_room: (
@@ -124,7 +129,7 @@ export interface ClientToServerEvents {
   ) => void;
   /** Fire-and-forget, throttlé serveur (POSITION_MIN_INTERVAL_MS). */
   position_update: (p: Position) => void;
-  update_symbol: (p: { sidc: string }) => void;
+  update_symbol: (p: { role: string }) => void;
   leave_room: () => void;
   send_order: (p: OrderMessage, ack: (res: Ack) => void) => void;
 }
@@ -135,7 +140,7 @@ export interface ServerToClientEvents {
   member_joined: (p: { member: MemberPublic }) => void;
   member_left: (p: { memberId: string; reason: 'left' | 'timeout' | 'kicked' }) => void;
   member_position: (p: { memberId: string; position: Position }) => void;
-  member_updated: (p: { memberId: string; sidc?: string; connected?: boolean }) => void;
+  member_updated: (p: { memberId: string; role?: string; connected?: boolean }) => void;
   /** `expired` = GC ; `closed` = clôture admin ; `kicked` = exclusion admin de CE membre. */
   room_closed: (p: { reason: 'expired' | 'closed' | 'kicked' }) => void;
   order: (o: OrderMessage) => void;

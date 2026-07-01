@@ -29,6 +29,9 @@ export interface GeoWatcher {
   getLastFix: () => Position | null;
   /** Force l'envoi du dernier fix (après rejoin). */
   resend: () => void;
+  /** Force l'acquisition immédiate d'un point frais (haute précision) — geste
+   *  utilisateur explicite (bouton « Centrer »). */
+  refresh: () => void;
 }
 
 /**
@@ -51,8 +54,10 @@ export function startGeolocation(handlers: GeoHandlers): GeoWatcher | null {
   let lastFix: Position | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
 
-  const takeFix = (): void => {
-    dlog('gps', 'acquisition…');
+  // `fresh` = acquisition demandée par l'utilisateur : haute précision, sans
+  // réutiliser de point en cache (maximumAge 0). Sinon échantillonnage basse conso.
+  const takeFix = (fresh = false): void => {
+    dlog('gps', fresh ? 'acquisition (rafraîchissement)…' : 'acquisition…');
     navigator.geolocation.getCurrentPosition(
       (gp) => {
         const p: Position = {
@@ -78,8 +83,8 @@ export function startGeolocation(handlers: GeoHandlers): GeoWatcher | null {
       // récepteur GPS non sollicité) ; maximumAge réutilise un point récent
       // plutôt que de relancer une acquisition.
       {
-        enableHighAccuracy: false,
-        maximumAge: Math.max(0, POSITION_INTERVAL_MS - 15_000),
+        enableHighAccuracy: fresh,
+        maximumAge: fresh ? 0 : Math.max(0, POSITION_INTERVAL_MS - 15_000),
         timeout: 30_000,
       },
     );
@@ -99,5 +104,6 @@ export function startGeolocation(handlers: GeoHandlers): GeoWatcher | null {
     resend() {
       if (lastFix) handlers.send({ ...lastFix, ts: Date.now() });
     },
+    refresh: () => takeFix(true),
   };
 }

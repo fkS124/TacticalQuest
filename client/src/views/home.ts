@@ -1,8 +1,8 @@
-import { DEFAULT_SIDC, CALLSIGN_REGEX, ROOM_CODE_LENGTH } from '@tq/shared/constants';
+import { DEFAULT_ROLE, CALLSIGN_REGEX, ROOM_CODE_LENGTH } from '@tq/shared/constants';
 import type { ErrorCode } from '@tq/shared/protocol';
 import { loadLastRoom, loadRoomHistory, removeRoomFromHistory, saveSession } from '../state';
 import { createRoom, joinRoom } from '../socket';
-import { SYMBOL_CHOICES, symbolSvg } from '../map/symbols';
+import { ROLE_KINDS, kindFigure, roleFigure, parseRole, roleDesignation, type RoleKind } from '../map/symbols';
 import { enterMap } from './mapView';
 
 const ERROR_FR: Record<ErrorCode, string> = {
@@ -13,11 +13,32 @@ const ERROR_FR: Record<ErrorCode, string> = {
   SERVER_FULL: 'Le serveur est saturé. Réessayez plus tard.',
   SESSION_INVALID: 'Session expirée.',
   INVALID_PAYLOAD: 'Saisie invalide.',
+  POST_TAKEN: 'Ce poste est déjà occupé dans la salle.',
+  POST_TAKEN_DISCONNECTED: 'Ce poste est occupé mais déconnecté.',
   RATE_LIMITED: 'Trop de salles créées récemment. Réessayez plus tard.',
   NOT_IN_ROOM: 'Vous n’êtes pas dans une salle.',
 };
 
-let selectedSidc = DEFAULT_SIDC;
+// Sélection courante dans l'arbre de commandement. Des valeurs par défaut sur
+// section/groupe/équipe garantissent un `role` toujours valide dès qu'un niveau
+// est choisi (cf. selectedRole).
+let level: RoleKind = parseRole(DEFAULT_ROLE).kind;
+let section = 1;
+let group = 1;
+let team: 'A' | 'B' = 'A';
+
+function selectedRole(): string {
+  switch (level) {
+    case 'CDS':
+      return `CDS:${section}`;
+    case 'CDG':
+      return `CDG:${section}:${group}`;
+    case 'CDE':
+      return `CDE:${section}:${group}:${team}`;
+    default:
+      return level; // CDU, GV : pas de sous-niveau
+  }
+}
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -65,23 +86,88 @@ function readCallsign(): string | null {
   return v;
 }
 
-export function initHome(): void {
-  // Sélecteur de symbole APP-6
-  const grid = $('symbol-grid');
-  for (const { sidc, label } of SYMBOL_CHOICES) {
+/** Une rangée de boutons segmentés (section / groupe / équipe). */
+function renderSegment<T extends number | string>(
+  host: HTMLElement,
+  label: string,
+  show: boolean,
+  values: readonly T[],
+  desig: (v: T) => string,
+  current: T,
+  onPick: (v: T) => void,
+): void {
+  host.hidden = !show;
+  host.innerHTML = '';
+  if (!show) return;
+  const cap = document.createElement('span');
+  cap.className = 'role-sub-label';
+  cap.textContent = label;
+  const row = document.createElement('div');
+  row.className = 'role-seg';
+  for (const v of values) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'role-seg-btn';
+    b.textContent = desig(v);
+    if (v === current) b.classList.add('selected');
+    b.addEventListener('click', () => onPick(v));
+    row.appendChild(b);
+  }
+  host.append(cap, row);
+}
+
+/** Reflète la sélection courante : niveau actif, sous-niveaux, aperçu. */
+function renderPicker(): void {
+  $('role-levels')
+    .querySelectorAll<HTMLElement>('.role-level')
+    .forEach((el) => el.classList.toggle('selected', el.dataset.kind === level));
+
+  const needSection = level === 'CDS' || level === 'CDG' || level === 'CDE';
+  const needGroup = level === 'CDG' || level === 'CDE';
+  const needTeam = level === 'CDE';
+
+  renderSegment($('role-section'), 'Section', needSection, [1, 2, 3] as const, (s) => String(s * 10), section, (s) => {
+    section = s;
+    renderPicker();
+  });
+  renderSegment($('role-group'), 'Groupe', needGroup, [1, 2, 3] as const, (g) => `${section}${g}`, group, (g) => {
+    group = g;
+    renderPicker();
+  });
+  renderSegment($('role-team'), 'Équipe', needTeam, ['A', 'B'] as const, (t) => `${section}${group}${t}`, team, (t) => {
+    team = t;
+    renderPicker();
+  });
+
+  const role = selectedRole();
+  const full = ROLE_KINDS.find((k) => k.kind === level)!.full;
+  const desig = roleDesignation(role);
+  $('role-preview').innerHTML =
+    `${roleFigure(role, 34)}<span class="role-preview-label">${full}${desig ? ` — ${desig}` : ''}</span>`;
+}
+
+function initRolePicker(): void {
+  const levels = $('role-levels');
+  levels.innerHTML = '';
+  for (const { kind, full } of ROLE_KINDS) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'symbol-choice';
+    btn.className = 'role-level';
+    btn.dataset.kind = kind;
+    btn.title = full;
     btn.setAttribute('role', 'option');
-    if (sidc === selectedSidc) btn.classList.add('selected');
-    btn.innerHTML = `${symbolSvg(sidc, 22)}<span>${label}</span>`;
+    btn.innerHTML = `${kindFigure(kind, 24)}<span>${kind}</span>`;
     btn.addEventListener('click', () => {
-      selectedSidc = sidc;
-      grid.querySelectorAll('.symbol-choice').forEach((el) => el.classList.remove('selected'));
-      btn.classList.add('selected');
+      level = kind;
+      renderPicker();
     });
-    grid.appendChild(btn);
+    levels.appendChild(btn);
   }
+  renderPicker();
+}
+
+export function initHome(): void {
+  initRolePicker();
 
   $('btn-create').addEventListener('click', async () => {
     const callsign = readCallsign();
@@ -89,14 +175,15 @@ export function initHome(): void {
     setBusy(true);
     showError(null);
     try {
-      const res = await createRoom(callsign, selectedSidc);
+      const role = selectedRole();
+      const res = await createRoom(callsign, role);
       if (!res.ok) return showError(ERROR_FR[res.error]);
       saveSession({
         roomCode: res.roomCode,
         memberId: res.memberId,
         sessionToken: res.sessionToken,
         callsign,
-        sidc: selectedSidc,
+        role,
         isLeader: true,
       });
       enterMap();
@@ -121,7 +208,7 @@ export function initHome(): void {
 
 /**
  * Rejoint la salle dont le code est saisi (ou pré-rempli par un chip d'historique).
- * `replace` reprend l'indicatif d'un membre déconnecté, après confirmation.
+ * `replace` reprend l'indicatif OU le poste d'un membre déconnecté, après confirmation.
  */
 async function attemptJoin(replace = false): Promise<void> {
   const callsign = readCallsign();
@@ -129,22 +216,27 @@ async function attemptJoin(replace = false): Promise<void> {
   const code = $<HTMLInputElement>('join-code').value.trim().toUpperCase();
   if (code.length !== ROOM_CODE_LENGTH)
     return showError(`Le code de salle fait ${ROOM_CODE_LENGTH} caractères.`);
+  const role = selectedRole();
   setBusy(true);
   showError(null);
   hideReplace();
   try {
-    const res = await joinRoom(code, callsign, selectedSidc, replace);
+    const res = await joinRoom(code, callsign, role, replace);
     if (!res.ok) {
       // Salle disparue (GC serveur) : on purge l'entrée d'historique périmée.
       if (res.error === 'ROOM_NOT_FOUND') {
         removeRoomFromHistory(code);
         renderHistory();
       }
-      // Indicatif tenu par un membre déconnecté : on propose de le remplacer.
-      if (res.error === 'CALLSIGN_TAKEN_DISCONNECTED') {
+      // Indicatif ou poste tenu par un membre déconnecté : on propose de le remplacer.
+      if (res.error === 'CALLSIGN_TAKEN_DISCONNECTED' || res.error === 'POST_TAKEN_DISCONNECTED') {
         showError(ERROR_FR[res.error]);
+        const what =
+          res.error === 'POST_TAKEN_DISCONNECTED'
+            ? `le poste ${roleDesignation(role) || parseRole(role).kind}`
+            : `« ${callsign} »`;
         const btn = $('btn-replace');
-        btn.textContent = `Remplacer « ${callsign} » (déconnecté)`;
+        btn.textContent = `Remplacer ${what} (déconnecté)`;
         btn.hidden = false;
         return;
       }
@@ -155,7 +247,7 @@ async function attemptJoin(replace = false): Promise<void> {
       memberId: res.memberId,
       sessionToken: res.sessionToken,
       callsign,
-      sidc: selectedSidc,
+      role,
       isLeader: false,
     });
     enterMap();

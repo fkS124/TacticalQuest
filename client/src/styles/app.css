@@ -151,12 +151,14 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
 .btn-replace[hidden] { display: none; }
 
 /* ----- sélecteur de symbole ----- */
-#symbol-grid {
+/* ----- sélecteur de poste (arbre de commandement) ----- */
+.role-picker { display: flex; flex-direction: column; gap: 10px; }
+.role-levels {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 8px;
 }
-.symbol-choice {
+.role-level {
   align-items: center;
   background: var(--panel);
   border: 2px solid transparent;
@@ -167,8 +169,34 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
   gap: 2px;
   padding: 8px 2px 4px;
 }
-.symbol-choice.selected { border-color: var(--accent); background: var(--panel-2); }
-.symbol-choice span { font-size: 0.62rem; color: var(--muted); text-align: center; }
+.role-level.selected { border-color: var(--accent); background: var(--panel-2); }
+.role-level span { font-size: 0.62rem; color: var(--muted); text-align: center; }
+
+.role-sub { display: flex; flex-direction: column; gap: 4px; }
+.role-sub-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.role-seg { display: flex; gap: 6px; }
+.role-seg-btn {
+  flex: 1;
+  background: var(--panel);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 700;
+  padding: 8px 2px;
+}
+.role-seg-btn.selected { border-color: var(--accent); background: var(--panel-2); }
+
+.role-preview {
+  align-items: center;
+  background: var(--panel-2);
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 10px;
+}
+.role-preview-label { font-size: 0.85rem; color: var(--text); }
 
 /* ----- écran carte ----- */
 #map-screen { position: fixed; inset: 0; }
@@ -244,6 +272,55 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
   top: 0;
   width: 2px;
   clip-path: polygon(0 0, 100% 0, 100% 36%, 0 36%, 0 0, 0 100%, 100% 100%, 100% 64%, 0 64%, 0 100%);
+}
+
+/* Rapporteur (cercle trigo) : overlay écran-fixe centré sur le réticule. Tourne
+   avec le nord (transform rotate posé par le JS = bearing de la carte). */
+#protractor {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(88vw, 66vh);
+  height: min(88vw, 66vh);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 1040; /* sous le réticule (1050) : le trou central reste visible */
+}
+#protractor svg { width: 100%; height: 100%; overflow: visible; }
+/* Épaisseurs en pixels écran réels (non liées à l'échelle du viewBox). */
+#protractor line, .pr-ring { vector-effect: non-scaling-stroke; }
+.pr-ring { fill: none; stroke: rgba(0, 168, 255, 0.6); stroke-width: 3; }
+.pr-minor { stroke: rgba(255, 255, 255, 0.9); stroke-width: 3; }
+.pr-major { stroke: #fff; stroke-width: 5; }
+.pr-north { stroke: #ff3b30; stroke-width: 6; }
+.pr-deg-label,
+.pr-mil-label {
+  text-anchor: middle;
+  dominant-baseline: central;
+  font-family: monospace;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.85);
+  stroke-width: 2.4px;
+  stroke-linejoin: round;
+}
+.pr-deg-label { fill: #fff; font-size: 12px; }
+.pr-mil-label { fill: #ffd166; font-size: 10px; }
+.pr-n { fill: #ff3b30; }
+#protractor-readout {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1100;
+  pointer-events: none;
+  background: rgba(12, 16, 11, 0.82);
+  color: #fff;
+  font: 700 0.85rem/1 monospace;
+  letter-spacing: 0.02em;
+  padding: 6px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
 }
 
 /* Coordonnées du centre, en bas à gauche */
@@ -388,8 +465,8 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
 #member-list li.offline .m-callsign { color: var(--muted); }
 #member-list .m-center { min-height: 36px; padding: 4px 10px; }
 
-/* Marqueur du chef de section */
-.leader-tag {
+/* Pastille de désignation de l'entité (10 / 22 / 22A), à côté de l'indicatif */
+.ent-tag {
   background: var(--accent);
   border-radius: 3px;
   color: var(--accent-ink);
@@ -400,10 +477,25 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
   padding: 1px 5px;
   vertical-align: middle;
 }
-.tq-tooltip .leader-tag { font-size: 0.58rem; }
+.tq-tooltip .ent-tag { font-size: 0.58rem; }
 
 /* ----- marqueurs ----- */
 .tq-sym { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)); }
+
+/* Figuré = symbole milsymbol + point CDE en overlay. Le conteneur est
+   dimensionné par le SVG ; le point déborde visiblement au-dessus. */
+.tq-figure { position: relative; display: inline-block; line-height: 0; }
+/* Point bleu au-dessus du cadre (chef d'équipe). */
+.tq-dot {
+  position: absolute;
+  left: 50%;
+  top: -5px;
+  width: 6px;
+  height: 6px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: rgb(128, 224, 255);
+}
 
 /* Nom d'une ligne, flottant à son extrémité ; figuré d'échelon en son centre.
    Marqueurs divIcon ancrés en (0,0) : le contenu déborde et se cale par transform. */
@@ -681,6 +773,11 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
 .tq-popup .leaflet-popup-tip { background: var(--panel); }
 .order-popup { display: flex; flex-direction: column; gap: 8px; }
 .order-author { color: var(--muted); font-size: 0.8rem; }
+/* Distance jusqu'à moi, sous la coordonnée du plot. */
+.order-dist { display: block; font-size: 0.82rem; font-weight: 600; margin-top: 2px; }
+/* Actions du popup : Modifier + Supprimer côte à côte. */
+.order-actions { display: flex; gap: 8px; }
+.order-actions .btn { flex: 1; }
 .order-delete { background: var(--danger); color: #fff; }
 
 /* ----- Comms : bouton, panneau latéral, chat ----- */
@@ -768,6 +865,44 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
 .cm-head b { font-size: 0.82rem; }
 .cm-time { color: var(--muted); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
 .cm-body { line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap; }
+
+/* Accusés de lecture (« lu / j'aime ») */
+.cm-react { align-items: center; display: flex; gap: 6px; margin-top: 4px; }
+.comms-msg.mine .cm-react { justify-content: flex-end; }
+.cm-like,
+.cm-count {
+  align-items: center;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  gap: 3px;
+  padding: 2px 8px;
+}
+.cm-like { padding: 3px; }
+.cm-like svg,
+.cm-count svg { height: 14px; width: 14px; }
+.cm-like.liked { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.cm-count { font-size: 0.72rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cm-likers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  margin: 5px 0 0;
+  padding: 0;
+}
+.comms-msg.mine .cm-likers { justify-content: flex-end; }
+.cm-likers li {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  padding: 1px 7px;
+}
 
 /* Composer : champ de saisie + bouton envoyer. */
 .comms-composer { align-items: stretch; display: flex; gap: 8px; }

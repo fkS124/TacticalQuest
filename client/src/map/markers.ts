@@ -1,6 +1,6 @@
 import L from 'leaflet';
 import type { MemberPublic } from '@tq/shared/protocol';
-import { getIcon } from './symbols';
+import { getIcon, roleDesignation } from './symbols';
 import { escapeHtml } from '../util';
 
 interface Tracked {
@@ -34,13 +34,13 @@ export class MarkerLayer {
 
     const isSelf = member.id === this.selfId;
     // Seul état visuel : grisé tant que le membre n'est pas (re)connecté.
-    const styleKey = `${member.sidc}|${member.connected ? 1 : 0}`;
+    const styleKey = `${member.role}|${member.connected ? 1 : 0}`;
     const tooltipKey = this.tooltipHtml(member);
 
     let t = this.tracked.get(member.id);
     if (!t) {
       const marker = L.marker([pos.lat, pos.lng], {
-        icon: getIcon(member.sidc, { disconnected: !member.connected, self: isSelf }),
+        icon: getIcon(member.role, { disconnected: !member.connected, self: isSelf }),
         zIndexOffset: isSelf ? 1000 : 0,
       });
       marker.bindTooltip(tooltipKey, {
@@ -59,7 +59,7 @@ export class MarkerLayer {
     } else {
       t.marker.setLatLng([pos.lat, pos.lng]);
       if (t.styleKey !== styleKey) {
-        t.marker.setIcon(getIcon(member.sidc, { disconnected: !member.connected, self: isSelf }));
+        t.marker.setIcon(getIcon(member.role, { disconnected: !member.connected, self: isSelf }));
         t.styleKey = styleKey;
       }
       if (t.tooltipKey !== tooltipKey) {
@@ -86,7 +86,8 @@ export class MarkerLayer {
   }
 
   private tooltipHtml(member: MemberPublic): string {
-    return escapeHtml(member.callsign) + (member.isLeader ? '<span class="leader-tag">CHEF</span>' : '');
+    const desig = roleDesignation(member.role);
+    return escapeHtml(member.callsign) + (desig ? `<span class="ent-tag">${desig}</span>` : '');
   }
 
   private updateAccuracy(lat: number, lng: number, accuracy: number): void {

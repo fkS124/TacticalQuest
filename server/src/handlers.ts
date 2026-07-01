@@ -4,7 +4,7 @@ import {
   FAILED_JOIN_DELAY_MS,
   GC_INTERVAL_MS,
   MAX_ORDER_BYTES,
-  SIDC_REGEX,
+  ROLE_REGEX,
 } from '@tq/shared/constants';
 import type {
   ClientToServerEvents,
@@ -29,8 +29,8 @@ function isValidCallsign(v: unknown): v is string {
   return typeof v === 'string' && CALLSIGN_REGEX.test(v.trim());
 }
 
-function isValidSidc(v: unknown): v is string {
-  return typeof v === 'string' && SIDC_REGEX.test(v);
+function isValidRole(v: unknown): v is string {
+  return typeof v === 'string' && ROLE_REGEX.test(v);
 }
 
 function isFiniteNum(v: unknown): v is number {
@@ -76,9 +76,9 @@ export function registerHandlers(io: TqServer, manager: RoomManager, limiter: Ip
 
     socket.on('create_room', (p, ack) => {
       if (typeof ack !== 'function') return;
-      if (!p || !isValidCallsign(p.callsign) || !isValidSidc(p.sidc)) return fail(ack, 'INVALID_PAYLOAD');
+      if (!p || !isValidCallsign(p.callsign) || !isValidRole(p.role)) return fail(ack, 'INVALID_PAYLOAD');
       if (!limiter.tryCreate(ip)) return fail(ack, 'RATE_LIMITED');
-      const res = manager.createRoom(p.callsign.trim(), p.sidc, socket.id);
+      const res = manager.createRoom(p.callsign.trim(), p.role, socket.id);
       if (isErr(res)) return fail(ack, res.error);
       enterRoom(socket, res.room, res.member);
       ack({
@@ -92,11 +92,11 @@ export function registerHandlers(io: TqServer, manager: RoomManager, limiter: Ip
 
     socket.on('join_room', (p, ack) => {
       if (typeof ack !== 'function') return;
-      if (!p || typeof p.roomCode !== 'string' || !isValidCallsign(p.callsign) || !isValidSidc(p.sidc)) {
+      if (!p || typeof p.roomCode !== 'string' || !isValidCallsign(p.callsign) || !isValidRole(p.role)) {
         return fail(ack, 'INVALID_PAYLOAD');
       }
       const code = p.roomCode.trim().toUpperCase();
-      const res = manager.joinRoom(code, p.callsign.trim(), p.sidc, socket.id, undefined, p.replace === true);
+      const res = manager.joinRoom(code, p.callsign.trim(), p.role, socket.id, undefined, p.replace === true);
       // Délai sur ROOM_NOT_FOUND : ralentit le brute-force des codes.
       if (isErr(res)) return fail(ack, res.error, res.error === 'ROOM_NOT_FOUND');
       enterRoom(socket, res.room, res.member);
@@ -135,9 +135,17 @@ export function registerHandlers(io: TqServer, manager: RoomManager, limiter: Ip
 
     socket.on('update_symbol', (p) => {
       const ctx = currentMember();
-      if (!ctx || !p || !isValidSidc(p.sidc)) return;
-      ctx.member.sidc = p.sidc;
-      socket.to(ctx.room.code).emit('member_updated', { memberId: ctx.member.id, sidc: p.sidc });
+      if (!ctx || !p || !isValidRole(p.role)) return;
+      // Unicité des postes : rejet silencieux si le poste visé est déjà tenu par
+      // un autre membre (best-effort — l'accusé n'est pas prévu par le protocole).
+      if (p.role !== 'GV') {
+        const taken = [...ctx.room.members.values()].some(
+          (m) => m.id !== ctx.member.id && m.role === p.role,
+        );
+        if (taken) return;
+      }
+      ctx.member.role = p.role;
+      socket.to(ctx.room.code).emit('member_updated', { memberId: ctx.member.id, role: p.role });
     });
 
     socket.on('send_order', (order, ack) => {

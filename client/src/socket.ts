@@ -68,10 +68,10 @@ function stopPositionFlush(): void {
   positionBuffer.clear();
 }
 
-socket.on('member_updated', ({ memberId, sidc, connected }) => {
+socket.on('member_updated', ({ memberId, role, connected }) => {
   const m = state.members.get(memberId);
   if (!m) return;
-  if (sidc !== undefined) m.sidc = sidc;
+  if (role !== undefined) m.role = role;
   if (connected !== undefined) {
     m.connected = connected;
     m.lastSeen = Date.now();
@@ -140,9 +140,9 @@ function ensureConnected(): void {
   if (!socket.connected) socket.connect();
 }
 
-export async function createRoom(callsign: string, sidc: string): Promise<Ack<JoinedRoom>> {
+export async function createRoom(callsign: string, role: string): Promise<Ack<JoinedRoom>> {
   ensureConnected();
-  const res = await socket.timeout(ACK_TIMEOUT_MS).emitWithAck('create_room', { callsign, sidc });
+  const res = await socket.timeout(ACK_TIMEOUT_MS).emitWithAck('create_room', { callsign, role });
   // Applique le snapshot initial : sinon les membres déjà présents (le chef
   // pour un subordonné qui rejoint après lui) ne seraient jamais affichés.
   if (res.ok) applyRoomState(res.roomState);
@@ -152,13 +152,13 @@ export async function createRoom(callsign: string, sidc: string): Promise<Ack<Jo
 export async function joinRoom(
   roomCode: string,
   callsign: string,
-  sidc: string,
+  role: string,
   replace = false,
 ): Promise<Ack<JoinedRoom>> {
   ensureConnected();
   const res = await socket
     .timeout(ACK_TIMEOUT_MS)
-    .emitWithAck('join_room', { roomCode, callsign, sidc, replace });
+    .emitWithAck('join_room', { roomCode, callsign, role, replace });
   if (res.ok) applyRoomState(res.roomState);
   return res;
 }
@@ -252,8 +252,8 @@ export function restorePendingOrders(): void {
   mergeOutbox();
 }
 
-export function sendSymbol(sidc: string): void {
-  if (socket.connected) socket.emit('update_symbol', { sidc });
+export function sendSymbol(role: string): void {
+  if (socket.connected) socket.emit('update_symbol', { role });
 }
 
 export function leaveRoom(): void {

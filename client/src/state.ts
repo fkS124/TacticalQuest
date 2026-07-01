@@ -5,7 +5,8 @@ export interface Session {
   memberId: string;
   sessionToken: string;
   callsign: string;
-  sidc: string;
+  /** Poste dans l'arbre de commandement (cf. ROLE_REGEX). */
+  role: string;
   isLeader: boolean;
 }
 
