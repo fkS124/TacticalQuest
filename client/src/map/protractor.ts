@@ -133,7 +133,7 @@ export class Protractor {
     this.target = latlng;
     if (!this.line) {
       this.line = L.polyline([this.map.getCenter(), latlng], {
-        color: '#00a8ff',
+        color: '#0033ff',
         weight: 2,
         dashArray: '6 5',
         interactive: false,
@@ -145,7 +145,7 @@ export class Protractor {
         radius: 4,
         color: '#fff',
         weight: 1.5,
-        fillColor: '#00a8ff',
+        fillColor: '#0033ff',
         fillOpacity: 1,
         interactive: false,
       }).addTo(this.map);

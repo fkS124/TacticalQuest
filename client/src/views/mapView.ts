@@ -485,7 +485,7 @@ function clearMissionPreview(): void {
 /** Depuis le panneau Tac : trace l'axe du figuré (origine → réticule). Les
  *  figurés amis sont bleus par doctrine : présélectionne cette couleur. */
 function startMissionSketch(missionId: string): void {
-  selectSketchColor('#00a8ff');
+  selectSketchColor('#0033ff');
   startSketch('mission', missionId);
 }
 

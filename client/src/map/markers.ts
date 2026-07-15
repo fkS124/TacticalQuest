@@ -129,7 +129,7 @@ export class MarkerLayer {
       this.accuracyCircle = L.circle([lat, lng], {
         radius: accuracy,
         weight: 1,
-        color: '#00a8ff',
+        color: '#0033ff',
         fill: false,
         interactive: false,
       }).addTo(this.map);

@@ -198,7 +198,7 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
 }
 #crosshair::before,
 #crosshair::after {
-  background: #00a8ff; /* bleu pétard : ressort sur topo comme sur satellite */
+  background: #0033ff; /* bleu pétard : ressort sur topo comme sur satellite */
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7);
   content: '';
   position: absolute;
@@ -233,7 +233,7 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
 #protractor svg { width: 100%; height: 100%; overflow: visible; }
 /* Épaisseurs en pixels écran réels (non liées à l'échelle du viewBox). */
 #protractor line, .pr-ring { vector-effect: non-scaling-stroke; }
-.pr-ring { fill: none; stroke: rgba(0, 168, 255, 0.6); stroke-width: 3; }
+.pr-ring { fill: none; stroke: rgba(0, 51, 255, 0.6); stroke-width: 3; }
 .pr-minor { stroke: rgba(255, 255, 255, 0.9); stroke-width: 3; }
 .pr-major { stroke: #fff; stroke-width: 5; }
 .pr-north { stroke: #ff3b30; stroke-width: 6; }
@@ -423,7 +423,7 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
   box-sizing: border-box;
 }
-.gps-dot-self { background: #00a8ff; }
+.gps-dot-self { background: #0033ff; }
 .gps-dot { background: var(--accent); border-width: 2px; }
 .gps-dot.is-disconnected { background: #7a7a7a; opacity: 0.45; }
 
@@ -932,7 +932,7 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
 .mission-card b { font-size: 0.8rem; }
 .mission-card small { color: var(--muted); font-size: 0.62rem; line-height: 1.15; text-align: center; }
 /* Aperçus SVG : traits « ami » bleus ; .solid = surfaces pleines (pointes). */
-.mission-card svg { color: #00a8ff; height: 36px; width: 64px; }
+.mission-card svg { color: #0033ff; height: 36px; width: 64px; }
 .mission-card svg :is(path, circle, ellipse) {
   fill: none;
   stroke: currentColor;
@@ -984,17 +984,6 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
   transform: translateX(-50%);
   z-index: 1100;
 }
-/* Écran étroit : la 1re rangée est prise (Comms/loupe + pastille d'état) —
-   le bandeau descend sur la 2e, à droite du bouton Tac. */
-@media (max-width: 700px) {
-  #layer-banner {
-    left: 100px;
-    max-width: none;
-    right: 64px; /* laisse le sélecteur de fonds Leaflet (haut droite) */
-    top: calc(60px + env(safe-area-inset-top, 0px));
-    transform: none;
-  }
-}
 #layer-banner::-webkit-scrollbar { display: none; }
 .layer-chip {
   background: rgba(24, 32, 27, 0.92);
@@ -1029,6 +1018,35 @@ input[type='text']:focus { outline: 2px solid var(--accent); border-color: trans
   min-height: 36px;
   padding: 5px 12px;
   width: 110px;
+}
+
+/* Écran étroit (téléphone) : la 1re rangée est prise (Comms/loupe + pastille
+   d'état) — le bandeau descend sur la 2e, à droite du bouton Tac. Et tous les
+   boutons flottants de la carte sont réduits de 20 %. (Bloc placé APRÈS les
+   règles de base qu'il surcharge : à spécificité égale, le dernier gagne.) */
+@media (max-width: 700px) {
+  #layer-banner {
+    left: 88px;
+    max-width: none;
+    right: 56px; /* laisse le sélecteur de fonds Leaflet (haut droite) */
+    top: calc(52px + env(safe-area-inset-top, 0px));
+    transform: none;
+  }
+  .fab { height: 43px; width: 43px; }
+  .fab svg { height: 21px; width: 21px; }
+  .comms-toggle { border-radius: 16px; font-size: 0.72rem; gap: 5px; min-height: 32px; padding: 5px 10px; }
+  .comms-toggle svg { height: 16px; width: 16px; }
+  .status-pill { border-radius: 16px; font-size: 0.76rem; gap: 6px; min-height: 32px; padding: 5px 11px; }
+  .layer-chip { border-radius: 14px; font-size: 0.68rem; max-width: 104px; min-height: 29px; padding: 4px 10px; }
+  #layer-add { font-size: 0.84rem; min-width: 29px; }
+  #layer-new-input { border-radius: 14px; font-size: 0.68rem; min-height: 29px; padding: 4px 10px; width: 88px; }
+  .coord-btn svg { height: 15px; width: 15px; }
+  #sketchbar .btn { min-height: 32px; padding: 5px 10px; }
+  /* Boutons de zoom Leaflet (44 px en mode tactile). */
+  .leaflet-touch .leaflet-bar a { height: 35px; line-height: 35px; width: 35px; }
+  /* Les rangées du haut sont moins hautes : remonter les contrôles Leaflet. */
+  .leaflet-top.leaflet-right { margin-top: calc(42px + env(safe-area-inset-top, 0px)); }
+  .leaflet-top.leaflet-left { margin-top: calc(90px + env(safe-area-inset-top, 0px)); }
 }
 
 /* ----- overlays / toast ----- */
