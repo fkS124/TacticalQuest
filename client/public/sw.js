@@ -59,11 +59,14 @@ self.addEventListener('fetch', (event) => {
   // Console d'admin : toujours servie en direct, jamais cachée (hors PWA).
   if (url.pathname.startsWith('/admin')) return;
 
-  // data.geopf.fr sert aussi le géocodage : seules les tuiles (/wmts) passent
-  // par le cache-first — cacher une recherche la figerait pour toujours.
+  // data.geopf.fr sert aussi le géocodage : seules les tuiles (/wmts, dont
+  // /private/wmts pour le SCAN 25) passent par le cache-first — cacher une
+  // recherche la figerait pour toujours.
   const isTile =
     TILE_HOSTS.includes(url.hostname) &&
-    (url.hostname !== 'data.geopf.fr' || url.pathname.startsWith('/wmts'));
+    (url.hostname !== 'data.geopf.fr' ||
+      url.pathname.startsWith('/wmts') ||
+      url.pathname.startsWith('/private/wmts'));
   if (isTile) {
     event.respondWith(tileStrategy(event.request));
     return;

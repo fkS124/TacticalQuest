@@ -4,7 +4,9 @@ import L from 'leaflet';
 // (cache hors-ligne des tuiles) — garder les deux synchronisés.
 
 // Clé de la couche affichée par défaut (voir aussi mapView.initLeaflet).
-export const DEFAULT_LAYER = 'Satellite';
+// Convention de nommage : provenance dans le nom, préfixe « Sat » pour
+// l'imagerie (isSatelliteBase s'appuie dessus).
+export const DEFAULT_LAYER = 'Sat IGN';
 
 /** Fond imagerie (sombre) ? Sert au quadrillage pour choisir sa couleur. */
 export function isSatelliteBase(name: string): boolean {
@@ -38,17 +40,29 @@ export function createBaseLayers(): Record<string, L.Layer> {
       'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
       { maxZoom: 19 },
     );
+  // SCAN 25 (carte topo IGN 1:25 000) : absent du WMTS ouvert — servi par
+  // l'endpoint « privé » de la Géoplateforme avec la clé partagée historique
+  // `ign_scan_ws` (celle des tutoriels IGN ; pourrait être révoquée un jour).
+  // Pyramide native jusqu'au z16, étirée au-delà par maxNativeZoom.
+  const scan25 = L.tileLayer(
+    'https://data.geopf.fr/private/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0' +
+      '&LAYER=GEOGRAPHICALGRIDSYSTEMS.MAPS.SCAN25TOUR&STYLE=normal&TILEMATRIXSET=PM' +
+      '&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg&apikey=ign_scan_ws',
+    { maxZoom: 19, maxNativeZoom: 16, attribution: '© <a href="https://www.ign.fr">IGN</a>' },
+  );
   return {
     // Ortho IGN 20 cm (France) + surcouche des routes/chemins.
-    Satellite: L.layerGroup([ignOrtho, transportation()]),
+    'Sat IGN': L.layerGroup([ignOrtho, transportation()]),
     // Secours mondial (hors couverture IGN) : imagerie Esri + mêmes routes.
-    'Sat. monde': L.layerGroup([esriImagery, transportation()]),
-    Topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+    'Sat Esri': L.layerGroup([esriImagery, transportation()]),
+    // Carte topo 1:25 000 (la « carte IGN 25 » de randonnée / TOPO 25).
+    'IGN 25': scan25,
+    // Plan IGN v2 : nettement plus riche et lisible que le rendu OSM brut
+    // (chemins, végétation, bâti, toponymie militaire-compatible).
+    'Plan IGN': ignWmts('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'image/png', 19),
+    'Topo OSM': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
       maxZoom: 17,
       attribution: '© <a href="https://opentopomap.org">OpenTopoMap</a> · OSM',
     }),
-    // Plan IGN v2 : nettement plus riche et lisible que le rendu OSM brut
-    // (chemins, végétation, bâti, toponymie militaire-compatible).
-    Plan: ignWmts('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'image/png', 19),
   };
 }
