@@ -121,10 +121,10 @@ export const ADMIN_HTML = /* html */ `<!doctype html>
         '<span class="code">' + r.code + '</span>' +
         '<span class="badge">' + r.connectedCount + '/' + r.memberCount + ' connectés</span>' +
         '<span class="badge">âge ' + fmtAge(r.createdAt) + '</span>' +
-        '<span class="badge">expire dans ' + fmtDuration(r.expiresInMs) + '</span>' +
+        '<span class="badge">' + (r.expiresInMs === null ? 'occupée — n\\'expire pas' : 'expire dans ' + fmtDuration(r.expiresInMs)) + '</span>' +
         '<span class="badge">' + r.orderCount + ' ordres</span>' +
         '<span class="room-actions">' +
-          '<button data-extend="' + r.code + '">Rallonger 24 h</button>' +
+          (r.expiresInMs === null ? '' : '<button data-extend="' + r.code + '">Rallonger 24 h</button>') +
           '<button class="danger" data-close="' + r.code + '">Terminer</button>' +
         '</span></div>' +
         (r.members.length

@@ -9,7 +9,6 @@ import {
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
   ROOM_EMPTY_TTL_MS,
-  ROOM_MAX_AGE_MS,
 } from '@tq/shared/constants';
 import type {
   ErrorCode,
@@ -73,9 +72,10 @@ export interface RoomSummary {
   code: string;
   createdAt: number;
   emptySince: number | null;
-  /** Instant d'expiration effectif (min de l'âge max et du TTL "vide"). */
-  expiresAt: number;
-  expiresInMs: number;
+  /** Instant d'expiration (24 h après la dernière connexion) ; null si la
+   *  room est occupée — TTL glissant, elle n'expire pas tant qu'on y est. */
+  expiresAt: number | null;
+  expiresInMs: number | null;
   memberCount: number;
   connectedCount: number;
   orderCount: number;
@@ -197,7 +197,9 @@ export class RoomManager {
     if (room.recentOrders.length > MAX_RECENT_ORDERS) room.recentOrders.shift();
   }
 
-  /** GC périodique : grâce des membres, rooms vides, durée de vie max. */
+  /** GC périodique : grâce des membres, rooms sans connexion depuis 24 h.
+   *  TTL glissant : une room occupée (au moins un connecté) ne meurt jamais ;
+   *  le compte à rebours de 24 h part de la dernière déconnexion. */
   sweep(now = Date.now()): SweepEvents {
     const events: SweepEvents = { memberTimeouts: [], closedRooms: [] };
     for (const room of this.rooms.values()) {
@@ -208,10 +210,7 @@ export class RoomManager {
         }
       }
       this.refreshEmptySince(room, now);
-      const emptyTooLong =
-        room.emptySince !== null && now - room.emptySince > ROOM_EMPTY_TTL_MS;
-      const tooOld = now - room.createdAt > ROOM_MAX_AGE_MS;
-      if (emptyTooLong || tooOld) {
+      if (room.emptySince !== null && now - room.emptySince > ROOM_EMPTY_TTL_MS) {
         this.rooms.delete(room.code);
         events.closedRooms.push(room.code);
       }
@@ -227,15 +226,14 @@ export class RoomManager {
   }
 
   /**
-   * Rallonge la durée de vie d'une room : on remet `createdAt` à maintenant
-   * (nouvelle fenêtre ROOM_MAX_AGE_MS) et, si la room est vide, on redémarre le
-   * compte à rebours "vide" (emptySince=now) — sinon il resterait figé loin dans
-   * le passé et la room serait GC malgré l'extension.
+   * Rallonge la durée de vie d'une room. Avec le TTL glissant, seule une room
+   * sans connexion a une échéance : on redémarre son compte à rebours "vide"
+   * (emptySince=now, nouvelle fenêtre ROOM_EMPTY_TTL_MS). Une room occupée
+   * n'expire pas — l'extension est alors sans effet.
    */
   extendRoom(code: string, now = Date.now()): boolean {
     const room = this.rooms.get(code);
     if (!room) return false;
-    room.createdAt = now;
     const hasConnected = [...room.members.values()].some((m) => m.connected);
     room.emptySince = hasConnected ? null : now;
     return true;
@@ -258,15 +256,13 @@ export class RoomManager {
   summarize(now = Date.now()): RoomSummary[] {
     return [...this.rooms.values()].map((room) => {
       const members = [...room.members.values()];
-      const ageExpiresAt = room.createdAt + ROOM_MAX_AGE_MS;
-      const emptyExpiresAt = room.emptySince === null ? null : room.emptySince + ROOM_EMPTY_TTL_MS;
-      const expiresAt = emptyExpiresAt === null ? ageExpiresAt : Math.min(ageExpiresAt, emptyExpiresAt);
+      const expiresAt = room.emptySince === null ? null : room.emptySince + ROOM_EMPTY_TTL_MS;
       return {
         code: room.code,
         createdAt: room.createdAt,
         emptySince: room.emptySince,
         expiresAt,
-        expiresInMs: Math.max(0, expiresAt - now),
+        expiresInMs: expiresAt === null ? null : Math.max(0, expiresAt - now),
         memberCount: members.length,
         connectedCount: members.filter((m) => m.connected).length,
         orderCount: room.recentOrders.length,

@@ -22,15 +22,17 @@ export const DEFAULT_SIDC = 'SFGPE----------'; // CDS (rond, chef de section)
 export const ROLE_REGEX = /^(CDU|GV|CDS:[1-3]|CDG:[1-3]:[1-3]|CDE:[1-3]:[1-3]:[AB])$/;
 export const DEFAULT_ROLE = 'CDS:1'; // section 10, choix par défaut
 
-export const ROOM_MAX_AGE_MS = 24 * 60 * 60_000;
+// TTL glissant : une salle vit tant que quelqu'un s'y connecte, et meurt
+// 24 h après la dernière connexion (pas de plafond dur depuis la création).
+// Concrètement : jamais supprimée tant qu'un membre est connecté, puis
+// compte à rebours de 24 h à partir du moment où elle n'a plus personne.
+export const ROOM_EMPTY_TTL_MS = 24 * 60 * 60_000;
 // Reconnexion : un membre déconnecté est conservé pendant la période de grâce
-// (re-binding via sessionToken) et reste visible en grisé par les autres. On la
-// cale sur la durée de vie de la room : un téléphone mis en veille des heures,
-// en zone blanche ou dont la PWA a été tuée par l'OS retrouve sa place tant que
-// la room existe. Au-delà, la room elle-même a disparu, donc rien à rejoindre.
-export const DISCONNECT_GRACE_MS = ROOM_MAX_AGE_MS;
-// Doit être ≥ à la grâce, sinon la room serait GC avant ses membres.
-export const ROOM_EMPTY_TTL_MS = ROOM_MAX_AGE_MS;
+// (re-binding via sessionToken) et reste visible en grisé par les autres.
+// 24 h : un téléphone mis en veille des heures, en zone blanche ou dont la PWA
+// a été tuée par l'OS retrouve sa place. Au-delà, le fantôme est purgé — dans
+// une salle encore vivante, l'indicatif redevient simplement libre.
+export const DISCONNECT_GRACE_MS = ROOM_EMPTY_TTL_MS;
 export const GC_INTERVAL_MS = 60_000;
 
 // Anti-abus.

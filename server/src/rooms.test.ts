@@ -4,7 +4,6 @@ import {
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
   ROOM_EMPTY_TTL_MS,
-  ROOM_MAX_AGE_MS,
 } from '@tq/shared/constants';
 import { isErr, RoomManager } from './rooms';
 
@@ -174,11 +173,24 @@ describe('GC des rooms', () => {
     expect(room.emptySince).toBeNull();
   });
 
-  it('supprime une room au-delà de la durée de vie max, même occupée', () => {
+  it('TTL glissant : une room occupée ne meurt jamais, quel que soit son âge', () => {
     const manager = new RoomManager();
     const { room } = createdRoom(manager);
-    const events = manager.sweep(T0 + ROOM_MAX_AGE_MS + 1);
-    expect(events.closedRooms).toEqual([room.code]);
+    // Bien au-delà de 24 h : le membre est toujours connecté → room conservée.
+    expect(manager.sweep(T0 + 3 * ROOM_EMPTY_TTL_MS).closedRooms).toHaveLength(0);
+    expect(manager.rooms.has(room.code)).toBe(true);
+  });
+
+  it('TTL glissant : le compte à rebours part de la dernière déconnexion', () => {
+    const manager = new RoomManager();
+    const { room, member } = createdRoom(manager);
+    // Room vieille de 2×TTL quand son dernier membre se déconnecte…
+    const t1 = T0 + 2 * ROOM_EMPTY_TTL_MS;
+    manager.markDisconnected(room.code, member.id, t1);
+    // …elle survit encore presque 24 h, puis meurt (le membre part en même
+    // temps : sa grâce, elle aussi de 24 h, expire au même balayage).
+    expect(manager.sweep(t1 + ROOM_EMPTY_TTL_MS - 1).closedRooms).toHaveLength(0);
+    expect(manager.sweep(t1 + ROOM_EMPTY_TTL_MS + 1).closedRooms).toEqual([room.code]);
   });
 });
 
@@ -204,12 +216,11 @@ describe('administration', () => {
     expect(manager.closeRoom(room.code)).toBe(false);
   });
 
-  it('extendRoom remet createdAt à maintenant et repousse l’expiration', () => {
+  it('extendRoom est sans effet sur une room occupée (elle n’expire pas)', () => {
     const manager = new RoomManager();
     const { room } = createdRoom(manager);
-    const later = T0 + ROOM_MAX_AGE_MS - 1000;
+    const later = T0 + 1000;
     expect(manager.extendRoom(room.code, later)).toBe(true);
-    expect(room.createdAt).toBe(later);
     // Occupée par un membre connecté → pas en compte à rebours "vide".
     expect(room.emptySince).toBeNull();
     expect(manager.extendRoom('ZZZZZ', later)).toBe(false);
@@ -245,7 +256,8 @@ describe('administration', () => {
     expect(summary.code).toBe(room.code);
     expect(summary.memberCount).toBe(2);
     expect(summary.connectedCount).toBe(1);
-    expect(summary.expiresAt).toBe(room.createdAt + ROOM_MAX_AGE_MS);
+    // TTL glissant : un membre encore connecté → aucune échéance.
+    expect(summary.expiresAt).toBeNull();
     // Le chef remonte en tête de liste.
     expect(summary.members[0]!.id).toBe(member.id);
     expect(summary.members[0]!.isLeader).toBe(true);

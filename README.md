@@ -12,7 +12,9 @@ dégradé.
 - **Auto-hébergé** : un seul process Node, aucune dépendance cloud, les données
   ne transitent par aucun tiers.
 - **Salles éphémères** : en mémoire serveur (snapshot périodique sur disque),
-  sans comptes. Membre déconnecté visible (grisé) et salle conservée 24 h.
+  sans comptes. TTL glissant : une salle vit tant qu'on s'y connecte et meurt
+  **24 h après la dernière connexion** ; un membre déconnecté reste visible
+  (grisé) 24 h.
 - **Résilient hors-ligne** : tuiles mises en cache pour les zones blanches ;
   ajouts/suppressions de figurés faits sans réseau, synchronisés à la
   reconnexion. PWA installable (page d'installation guidée sur mobile).
@@ -107,8 +109,9 @@ HTTPS). Utiliser Caddy devant le port 3000 (voir `Caddyfile`) :
 
 ### Console d'administration
 
-Une page `/admin` permet de lister les salles actives, les **terminer**, les
-**rallonger** (24 h) et **exclure** un membre. Elle est protégée par un code
+Une page `/admin` permet de lister les salles actives, les **terminer**,
+**relancer** le compte à rebours d'une salle vide (24 h) et **exclure** un
+membre. Elle est protégée par un code
 dont seul le **hash sha256** vit côté serveur, dans le secret `ADMIN_CODE_HASH` :
 
 ```bash
