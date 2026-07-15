@@ -5,7 +5,9 @@ export interface Session {
   memberId: string;
   sessionToken: string;
   callsign: string;
-  /** Poste dans l'arbre de commandement (cf. ROLE_REGEX). */
+  /** Conservé pour la compat protocole/serveur ; toujours 'GV' depuis la
+   *  disparition du sélecteur de poste (les figurés hiérarchiques pourraient
+   *  revenir un jour — le modèle serveur les gère encore). */
   role: string;
   isLeader: boolean;
 }
@@ -16,10 +18,11 @@ export type BusEvent =
   | 'members' // roster ou attributs d'un membre modifiés
   | 'position' // une position a bougé (détail: memberId)
   | 'orders' // ordre reçu/ajouté (graphiques, waypoints…)
+  | 'overlays' // calques d'affichage modifiés (visibilité / calque actif)
   | 'coordfmt' // format de coordonnées changé (MGRS/UTM/géo)
   | 'conn'
   | 'rejoined' // re-binding réussi après coupure
-  | 'session-lost'; // room GC côté serveur → retour accueil
+  | 'session-lost'; // room GC côté serveur → retour carte solo
 
 type Listener = (detail?: unknown) => void;
 
@@ -46,6 +49,7 @@ const SESSION_KEY = 'tq-session';
 const LAST_ROOM_KEY = 'tq-last-room';
 const ROOM_HISTORY_KEY = 'tq-room-history';
 const ROOM_HISTORY_MAX = 6;
+const CALLSIGN_KEY = 'tq-callsign';
 
 /** Indice de reconnexion : survit à clearSession (expiration), pas à un départ explicite. */
 export interface LastRoom {
@@ -92,7 +96,20 @@ export function clearSession(): void {
   localStorage.removeItem(SESSION_KEY);
 }
 
-/** Dernière room rejointe, pour pré-remplir l'accueil après une expiration serveur. */
+/** Indicatif mémorisé pour pré-remplir la modale de salle aux prochains join. */
+export function saveCallsign(callsign: string): void {
+  try {
+    localStorage.setItem(CALLSIGN_KEY, callsign);
+  } catch {
+    /* quota : tant pis */
+  }
+}
+
+export function loadCallsign(): string | null {
+  return localStorage.getItem(CALLSIGN_KEY);
+}
+
+/** Dernière room rejointe, pour pré-remplir la modale après une expiration serveur. */
 export function loadLastRoom(): LastRoom | null {
   try {
     const raw = localStorage.getItem(LAST_ROOM_KEY);

@@ -98,6 +98,14 @@ describe('visibleWaypoints', () => {
     expect(out[0]!.sidc).toBeUndefined();
   });
 
+  it('conserve le calque d’un plot', () => {
+    const pt: OrderMessage = {
+      id: 'p2', authorId: 'a2', ts: 1, kind: 'waypoint',
+      payload: { kind: 'waypoint', name: 'OBJ', lat: 45.1, lng: 5.7, color: '#e8d44d', layer: 'T1' },
+    };
+    expect(visibleWaypoints(new Map([['p2', pt]]))[0]!.layer).toBe('T1');
+  });
+
   it('masque un plot visé par un remove, sans toucher aux graphiques', () => {
     const orders = new Map<string, OrderMessage>([
       ['w1', wp('w1')],

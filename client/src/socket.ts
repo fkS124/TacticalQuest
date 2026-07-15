@@ -140,9 +140,17 @@ function ensureConnected(): void {
   if (!socket.connected) socket.connect();
 }
 
-export async function createRoom(callsign: string, role: string): Promise<Ack<JoinedRoom>> {
+// Depuis l'abandon du sélecteur de poste, tout le monde entre en 'GV' : c'est
+// le seul rôle du protocole exempt d'unicité (POST_TAKEN ne peut plus arriver)
+// et le serveur reste inchangé — le champ `role` survit pour un retour futur
+// des figurés hiérarchiques.
+export const FIXED_ROLE = 'GV';
+
+export async function createRoom(callsign: string): Promise<Ack<JoinedRoom>> {
   ensureConnected();
-  const res = await socket.timeout(ACK_TIMEOUT_MS).emitWithAck('create_room', { callsign, role });
+  const res = await socket
+    .timeout(ACK_TIMEOUT_MS)
+    .emitWithAck('create_room', { callsign, role: FIXED_ROLE });
   // Applique le snapshot initial : sinon les membres déjà présents (le chef
   // pour un subordonné qui rejoint après lui) ne seraient jamais affichés.
   if (res.ok) applyRoomState(res.roomState);
@@ -152,13 +160,12 @@ export async function createRoom(callsign: string, role: string): Promise<Ack<Jo
 export async function joinRoom(
   roomCode: string,
   callsign: string,
-  role: string,
   replace = false,
 ): Promise<Ack<JoinedRoom>> {
   ensureConnected();
   const res = await socket
     .timeout(ACK_TIMEOUT_MS)
-    .emitWithAck('join_room', { roomCode, callsign, role, replace });
+    .emitWithAck('join_room', { roomCode, callsign, role: FIXED_ROLE, replace });
   if (res.ok) applyRoomState(res.roomState);
   return res;
 }
@@ -250,10 +257,6 @@ export function pendingOrderCount(): number {
 /** Ré-affiche les ordres en attente après un rechargement (état en mémoire vidé). */
 export function restorePendingOrders(): void {
   mergeOutbox();
-}
-
-export function sendSymbol(role: string): void {
-  if (socket.connected) socket.emit('update_symbol', { role });
 }
 
 export function leaveRoom(): void {

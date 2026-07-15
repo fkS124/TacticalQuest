@@ -132,11 +132,13 @@ export function utmZone(lat: number, lng: number): number {
   return zone;
 }
 
-export function toUtm(lat: number, lng: number): UtmCoords {
+/** `forcedZone` : projeter dans une zone imposée (grille continue au bord de
+ *  zone — le quadrillage projette toute la vue dans la zone du centre). */
+export function toUtm(lat: number, lng: number, forcedZone?: number): UtmCoords {
   const a = 6378137;
   const e2 = 0.00669438;
   const k0 = 0.9996;
-  const zone = utmZone(lat, lng);
+  const zone = forcedZone ?? utmZone(lat, lng);
   const latR = (lat * Math.PI) / 180;
   const lngR = (lng * Math.PI) / 180;
   const lngOriginR = (((zone - 1) * 6 - 180 + 3) * Math.PI) / 180;
@@ -176,4 +178,53 @@ export function toUtm(lat: number, lng: number): UtmCoords {
   if (lat < 0) northing += 10000000;
 
   return { zone, band: latitudeBand(lat), easting, northing };
+}
+
+/** Conversion inverse UTM → lat/lng (Snyder, réciproque de toUtm, < 1 m). */
+export function fromUtm(
+  zone: number,
+  easting: number,
+  northing: number,
+  southern = false,
+): { lat: number; lng: number } {
+  const a = 6378137;
+  const e2 = 0.00669438;
+  const k0 = 0.9996;
+  const ep2 = e2 / (1 - e2);
+  const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+
+  const x = easting - 500000;
+  const y = southern ? northing - 10000000 : northing;
+
+  const mu =
+    y / k0 / (a * (1 - e2 / 4 - (3 * e2 * e2) / 64 - (5 * e2 * e2 * e2) / 256));
+  const phi1 =
+    mu +
+    ((3 * e1) / 2 - (27 * e1 ** 3) / 32) * Math.sin(2 * mu) +
+    ((21 * e1 * e1) / 16 - (55 * e1 ** 4) / 32) * Math.sin(4 * mu) +
+    ((151 * e1 ** 3) / 96) * Math.sin(6 * mu);
+
+  const sinP = Math.sin(phi1);
+  const cosP = Math.cos(phi1);
+  const tanP = Math.tan(phi1);
+  const C1 = ep2 * cosP * cosP;
+  const T1 = tanP * tanP;
+  const N1 = a / Math.sqrt(1 - e2 * sinP * sinP);
+  const R1 = (a * (1 - e2)) / Math.pow(1 - e2 * sinP * sinP, 1.5);
+  const D = x / (N1 * k0);
+
+  const latR =
+    phi1 -
+    ((N1 * tanP) / R1) *
+      ((D * D) / 2 -
+        ((5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * ep2) * D ** 4) / 24 +
+        ((61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 252 * ep2 - 3 * C1 * C1) * D ** 6) / 720);
+  const lngR =
+    (D -
+      ((1 + 2 * T1 + C1) * D ** 3) / 6 +
+      ((5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * ep2 + 24 * T1 * T1) * D ** 5) / 120) /
+    cosP;
+
+  const lngOrigin = (zone - 1) * 6 - 180 + 3;
+  return { lat: (latR * 180) / Math.PI, lng: lngOrigin + (lngR * 180) / Math.PI };
 }

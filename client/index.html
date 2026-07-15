@@ -11,50 +11,10 @@
   <link rel="apple-touch-icon" href="/icons/icon-192.png" />
   <title>TacticalQuest</title>
 </head>
-<body class="screen-home">
+<body class="solo">
 
-  <!-- Écran d'accueil : créer ou rejoindre -->
-  <main id="home">
-    <h1>TacticalQuest</h1>
-    <p class="subtitle">Carte tactique collaborative</p>
-
-    <label class="field">
-      <span>Indicatif</span>
-      <input id="callsign" type="text" maxlength="16" autocomplete="off"
-             placeholder="Alpha 1" enterkeyhint="done" />
-    </label>
-
-    <div class="field">
-      <span>Poste</span>
-      <div id="role-picker" class="role-picker">
-        <div id="role-levels" class="role-levels" role="listbox" aria-label="Niveau de commandement"></div>
-        <div id="role-section" class="role-sub" hidden></div>
-        <div id="role-group" class="role-sub" hidden></div>
-        <div id="role-team" class="role-sub" hidden></div>
-        <div id="role-preview" class="role-preview" aria-live="polite"></div>
-      </div>
-    </div>
-
-    <button id="btn-create" class="btn btn-primary">Créer une salle</button>
-
-    <div class="separator"><span>ou</span></div>
-
-    <div class="join-row">
-      <input id="join-code" type="text" maxlength="5" autocomplete="off"
-             autocapitalize="characters" placeholder="CODE" enterkeyhint="go" />
-      <button id="btn-join" class="btn">Rejoindre</button>
-    </div>
-
-    <div id="room-history" class="room-history" hidden>
-      <span class="room-history-label">Salles récentes</span>
-      <div id="room-history-list" class="room-history-list"></div>
-    </div>
-
-    <p id="home-error" class="error" hidden></p>
-    <button id="btn-replace" class="btn btn-replace" hidden></button>
-  </main>
-
-  <!-- Écran carte -->
+  <!-- Écran carte : l'app s'ouvre directement dessus, en mode solo (body.solo)
+       tant qu'aucune salle n'est rejointe. -->
   <div id="map-screen">
     <div id="map"></div>
 
@@ -67,13 +27,87 @@
         <span id="conn-dot" class="conn-reconnecting"></span>
         <span id="member-count">0</span>
       </span>
+      <button id="btn-room" class="status-pill" title="Rejoindre ou créer une salle">Salle</button>
     </div>
 
-    <button id="btn-comms" class="comms-toggle" title="Comms">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 3.5z"/></svg>
-      <span>Comms</span>
-      <span id="comms-badge" hidden></span>
-    </button>
+    <!-- Rejoindre / créer une salle (indicatif + code) -->
+    <div id="room-menu" class="tool-modal" hidden>
+      <div class="tool-modal-card">
+        <h3>Salle</h3>
+        <label class="tool-modal-field">
+          <span>Indicatif</span>
+          <input id="room-callsign" type="text" maxlength="16" autocomplete="off"
+                 placeholder="Alpha 1" enterkeyhint="done">
+        </label>
+        <div class="join-row">
+          <input id="room-code" type="text" maxlength="5" autocomplete="off"
+                 autocapitalize="characters" placeholder="CODE" enterkeyhint="go">
+          <button id="btn-room-join" class="btn">Rejoindre</button>
+        </div>
+        <div class="separator"><span>ou</span></div>
+        <button id="btn-room-create" class="btn btn-primary">Créer une salle</button>
+        <div id="room-history" class="room-history" hidden>
+          <span class="room-history-label">Salles récentes</span>
+          <div id="room-history-list" class="room-history-list"></div>
+        </div>
+        <p id="room-error" class="error" hidden></p>
+        <button id="btn-replace" class="btn btn-replace" hidden></button>
+        <button id="btn-room-cancel" class="btn">Annuler</button>
+      </div>
+    </div>
+
+    <div id="topleft-cluster">
+      <div class="topleft-row">
+        <button id="btn-comms" class="comms-toggle" title="Comms">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 3.5z"/></svg>
+          <span>Comms</span>
+          <span id="comms-badge" hidden></span>
+        </button>
+        <button id="btn-place" class="comms-toggle" title="Rechercher un lieu" aria-label="Rechercher un lieu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.5-4.5"/></svg>
+        </button>
+      </div>
+      <div class="topleft-row">
+        <button id="btn-tac" class="comms-toggle" title="Missions et calques">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20 20 4M14 4h6v6M4 4l16 16M4 14v6h6"/></svg>
+          <span>Tac</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Bandeau des calques : une puce par calque, tap = afficher/masquer,
+         « + » = créer. Les nouveaux figurés vont dans le dernier sélectionné. -->
+    <div id="layer-banner"></div>
+
+    <!-- Panneau Tac : figurés de mission (section / groupe) -->
+    <aside id="tac-panel" hidden>
+      <header class="panel-head">
+        <h2>Missions</h2>
+        <button id="tac-close" class="topbar-btn">Fermer</button>
+      </header>
+      <div id="tac-level" class="segmented">
+        <button data-level="section" class="selected">Section</button>
+        <button data-level="groupe">Groupe</button>
+      </div>
+      <div id="mission-list"></div>
+    </aside>
+
+    <!-- Recherche de lieu (géocodage IGN : adresses, communes, lieux-dits) -->
+    <div id="place-menu" class="tool-modal" hidden>
+      <div class="tool-modal-card">
+        <h3>Rechercher un lieu</h3>
+        <label class="tool-modal-field">
+          <span>Commune, adresse, lieu-dit…</span>
+          <input id="place-input" type="text" autocomplete="off"
+                 placeholder="ex. Mourmelon, Bois de la Grille" enterkeyhint="search">
+        </label>
+        <ul id="place-results" class="place-results" hidden></ul>
+        <p id="place-status" class="composer-label" hidden></p>
+        <div class="tool-modal-actions">
+          <button id="place-cancel" class="btn">Annuler</button>
+        </div>
+      </div>
+    </div>
 
     <aside id="comms-panel" hidden>
       <header class="panel-head">
@@ -121,8 +155,8 @@
       <span id="sketch-info">0 m</span>
       <div id="sketch-colors" hidden>
         <button class="color-dot" data-color="#e8d44d" style="background:#e8d44d"></button>
-        <button class="color-dot" data-color="#4f9dd9" style="background:#4f9dd9"></button>
-        <button class="color-dot" data-color="#c0564f" style="background:#c0564f"></button>
+        <button class="color-dot" data-color="#00a8ff" style="background:#00a8ff"></button>
+        <button class="color-dot" data-color="#ff3b30" style="background:#ff3b30"></button>
       </div>
       <button id="sketch-add" class="btn" title="Poser un point sous le réticule">Point</button>
       <button id="sketch-ok" class="btn btn-primary">Valider</button>
@@ -199,9 +233,9 @@
         <p class="composer-label">Couleur du rond</p>
         <div class="point-colors" id="point-colors">
           <button type="button" class="color-dot selected" data-color="#e8d44d" style="background:#e8d44d"></button>
-          <button type="button" class="color-dot" data-color="#4f9dd9" style="background:#4f9dd9"></button>
+          <button type="button" class="color-dot" data-color="#00a8ff" style="background:#00a8ff"></button>
           <button type="button" class="color-dot" data-color="#5fb35a" style="background:#5fb35a"></button>
-          <button type="button" class="color-dot" data-color="#c0564f" style="background:#c0564f"></button>
+          <button type="button" class="color-dot" data-color="#ff3b30" style="background:#ff3b30"></button>
         </div>
         <div class="tool-modal-actions">
           <button id="point-cancel" class="btn">Annuler</button>
@@ -282,6 +316,17 @@
           <button data-fmt="utm">UTM</button>
           <button data-fmt="latlng">Géo</button>
         </div>
+      </div>
+      <div class="option-row">
+        <span>Quadrillage km</span>
+        <div id="grid-toggle" class="segmented">
+          <button data-grid="on">Affiché</button>
+          <button data-grid="off">Masqué</button>
+        </div>
+      </div>
+      <div class="option-row">
+        <span>Figurés et tracés</span>
+        <button id="btn-clear-map" class="btn btn-danger">Tout effacer</button>
       </div>
       <!-- Diagnostic veille masqué : conservé pour un usage ultérieur. -->
       <div class="option-row" hidden>

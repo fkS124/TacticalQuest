@@ -15,8 +15,8 @@ const TILE_CACHE = 'tq-tiles-v1';
 // Garder synchronisé avec client/src/map/layers.ts
 const TILE_HOSTS = [
   'tile.opentopomap.org',
-  'tile.openstreetmap.org',
   'server.arcgisonline.com',
+  'data.geopf.fr',
 ];
 
 const TILE_CACHE_MAX = 2000;
@@ -59,7 +59,12 @@ self.addEventListener('fetch', (event) => {
   // Console d'admin : toujours servie en direct, jamais cachée (hors PWA).
   if (url.pathname.startsWith('/admin')) return;
 
-  if (TILE_HOSTS.includes(url.hostname)) {
+  // data.geopf.fr sert aussi le géocodage : seules les tuiles (/wmts) passent
+  // par le cache-first — cacher une recherche la figerait pour toujours.
+  const isTile =
+    TILE_HOSTS.includes(url.hostname) &&
+    (url.hostname !== 'data.geopf.fr' || url.pathname.startsWith('/wmts'));
+  if (isTile) {
     event.respondWith(tileStrategy(event.request));
     return;
   }

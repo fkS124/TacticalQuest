@@ -4,6 +4,8 @@ import type { LineEchelon, OrderMessage } from '@tq/shared/protocol';
 import { coordsWithAltitudeHtml, hydrateAltitudes } from '../elevation';
 import { distanceM } from '../geo';
 import { escapeHtml, formatDistance, safeColor } from '../util';
+import { missionDef } from './missionCatalog';
+import { renderMission } from './missions';
 import { visibleGraphics, visibleWaypoints, type GraphicOrder, type WaypointOrder } from './orderFilter';
 import { getPlotIcon, HOSTILE_SIDC } from './symbols';
 
@@ -75,6 +77,8 @@ type Rendered =
       label: L.Marker | null;
       /** Figuré d'échelon au centre de la ligne (ancré en géographique). */
       echelon: L.Marker | null;
+      /** Couches d'un figuré de mission (tracés + étiquettes). */
+      extra: L.Layer[] | null;
     }
   | { kind: 'plot'; marker: L.Marker; w: WaypointOrder };
 
@@ -96,6 +100,8 @@ export interface OrdersLayerCallbacks {
   selfLatLng: () => [number, number] | null;
   /** Vrai pendant une esquisse : ne pas ouvrir de popup sous le doigt. */
   isSketching: () => boolean;
+  /** Calque masqué localement : le figuré n'est pas rendu. */
+  isLayerHidden: (layer?: string) => boolean;
 }
 
 export class OrdersLayer {
@@ -109,8 +115,16 @@ export class OrdersLayer {
   }
 
   sync(orders: Map<string, OrderMessage>): void {
-    const graphics = new Map(visibleGraphics(orders).map((g) => [g.id, g]));
-    const plots = new Map(visibleWaypoints(orders).map((w) => [w.id, w]));
+    const graphics = new Map(
+      visibleGraphics(orders)
+        .filter((g) => !this.cb.isLayerHidden(g.style.layer))
+        .map((g) => [g.id, g]),
+    );
+    const plots = new Map(
+      visibleWaypoints(orders)
+        .filter((w) => !this.cb.isLayerHidden(w.layer))
+        .map((w) => [w.id, w]),
+    );
     for (const [id, r] of this.rendered) {
       if (!graphics.has(id) && !plots.has(id)) {
         this.removeRendered(r);
@@ -143,6 +157,7 @@ export class OrdersLayer {
       r.head?.remove();
       r.label?.remove();
       r.echelon?.remove();
+      for (const l of r.extra ?? []) l.remove();
     } else {
       r.marker.remove();
     }
@@ -153,6 +168,27 @@ export class OrdersLayer {
     // attributs style) avant tout rendu.
     const color = safeColor(g.style.color) ?? DEFAULT_COLOR;
     const weight = g.style.weight ?? 4;
+    // Figuré de mission : le dessin (tracés + étiquettes) vient du catalogue ;
+    // l'axe tracé par l'auteur devient une ligne invisible mais large, cible
+    // de tap commode. Id inconnu (client plus récent ?) → ligne simple.
+    if (g.style.mission) {
+      const extra = renderMission(this.map, g.style.mission, g.latlngs, color, weight);
+      if (extra.length) {
+        const line = L.polyline(g.latlngs, { color, weight: 22, opacity: 0 }).addTo(this.map);
+        const onClick = (e: L.LeafletMouseEvent): void => {
+          if (this.cb.isSketching()) return;
+          L.DomEvent.stop(e);
+          this.openGraphicPopup(g, e.latlng);
+        };
+        line.on('click', onClick);
+        for (const l of extra) {
+          l.addTo(this.map);
+          if (l instanceof L.Path) l.on('click', onClick);
+        }
+        this.rendered.set(g.id, { kind: 'graphic', graphic: g, line, head: null, label: null, echelon: null, extra });
+        return;
+      }
+    }
     // Une box est une polyligne fermée, remplie en semi-transparent.
     const line = g.style.polygon
       ? L.polygon(g.latlngs, { color, weight, fillColor: color, fillOpacity: 0.18, opacity: 0.9 }).addTo(this.map)
@@ -162,7 +198,7 @@ export class OrdersLayer {
       L.DomEvent.stop(e);
       this.openGraphicPopup(g, e.latlng);
     });
-    const r: Rendered = { kind: 'graphic', graphic: g, line, head: null, label: null, echelon: null };
+    const r: Rendered = { kind: 'graphic', graphic: g, line, head: null, label: null, echelon: null, extra: null };
     // Flèche et figuré d'échelon ne concernent que les lignes ouvertes.
     if (g.style.arrow && !g.style.polygon) r.head = this.makeHead(g, color);
     if (g.style.label) {
@@ -298,6 +334,12 @@ export class OrdersLayer {
   }
 
   private openGraphicPopup(g: GraphicOrder, at: L.LatLng): void {
+    // Figuré de mission : nom doctrinal, pas de longueur (l'axe n'en est pas une).
+    const m = g.style.mission ? missionDef(g.style.mission) : undefined;
+    if (m) {
+      this.openPopup(g.id, g.authorId, `<b>${escapeHtml(`${m.name} (${m.abbr})`)}</b>`, at);
+      return;
+    }
     const fallback = g.style.polygon ? 'Box' : g.style.arrow ? 'Flèche' : 'Liseré';
     const name = g.style.label ? escapeHtml(g.style.label) : fallback;
     // Box : le périmètre n'apporte rien — on n'affiche que le nom.

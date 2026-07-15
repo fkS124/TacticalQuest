@@ -1,11 +1,11 @@
 import 'leaflet/dist/leaflet.css';
 import './styles/app.css';
 import { loadSession } from './state';
-import { initHome, showHome } from './views/home';
+import { initRoomMenu } from './views/roomMenu';
 import { enterMap, initMapView, toast } from './views/mapView';
 import { shouldShowInstallGate, showInstallGate } from './views/installGate';
 
-initHome();
+initRoomMenu();
 initMapView();
 
 // Sur mobile dans un navigateur (pas en PWA installée), on masque le site
@@ -14,11 +14,11 @@ if (shouldShowInstallGate()) showInstallGate(startApp);
 else startApp();
 
 function startApp(): void {
-  // Une session en localStorage survit au reload, à la mise en veille et à la
-  // fermeture/relance de la PWA : retour direct sur la carte, le socket fait le
-  // rejoin (re-binding via sessionToken).
-  if (loadSession()) enterMap();
-  else showHome();
+  // Carte directe, avec ou sans salle. Une session en localStorage survit au
+  // reload, à la mise en veille et à la fermeture/relance de la PWA : le socket
+  // fait le rejoin (re-binding via sessionToken) ; sinon on démarre en solo.
+  loadSession();
+  enterMap();
 }
 
 registerServiceWorker();

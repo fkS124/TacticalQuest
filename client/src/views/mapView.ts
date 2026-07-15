@@ -5,18 +5,24 @@ import { startCompass, type CompassStop } from '../map/compass';
 import { Protractor } from '../map/protractor';
 import { POSITION_INTERVAL_MS } from '@tq/shared/constants';
 import type { GraphicStyle, LineEchelon, MemberPublic, Position } from '@tq/shared/protocol';
-import { bus, state } from '../state';
+import { bus, loadLastRoom, state } from '../state';
 import { cycleCoordFormat, formatCoords, getCoordFormat, parseCoords, setCoordFormat, type CoordFormat } from '../coords';
 import { cachedElevation, coordsWithAltitudeHtml, elevationKey, fetchElevation, hydrateAltitudes } from '../elevation';
-import { connectForSession, leaveRoom, pendingOrderCount, restorePendingOrders, sendOrder, sendPosition } from '../socket';
+import { connectForSession, leaveRoom, pendingOrderCount, restorePendingOrders, sendPosition } from '../socket';
+import { offerSoloImport, orderAuthor, restoreSoloOrders, SOLO_AUTHOR, submitOrder } from '../soloOrders';
 import { startGeolocation, type GeoWatcher } from '../geo';
 import { dlog, formatLog, clearLog, onLog } from '../debugLog';
+import { searchPlaces, type PlaceResult } from '../geocode';
+import { CoordGrid, gridEnabled } from '../map/grid';
 import { createBaseLayers, DEFAULT_LAYER } from '../map/layers';
 import { MarkerLayer } from '../map/markers';
+import { missionDef } from '../map/missionCatalog';
+import { renderMission } from '../map/missions';
 import { OrdersLayer } from '../map/orders';
-import type { WaypointOrder } from '../map/orderFilter';
+import { activeLayer, isLayerHidden } from '../map/overlays';
+import { visibleGraphics, visibleWaypoints, type WaypointOrder } from '../map/orderFilter';
 import { PolylineSketch } from '../map/sketch';
-import { HOSTILE_SIDC, roleFigure, roleDesignation } from '../map/symbols';
+import { HOSTILE_SIDC } from '../map/symbols';
 import {
   checkIncomingMessages,
   closeComms,
@@ -25,8 +31,10 @@ import {
   resetCommsNotifications,
   unreadCommsCount,
 } from './commsPanel';
+import { initLayerBanner } from './layerBanner';
+import { closeTac, initTacPanel } from './tacPanel';
 import { escapeHtml, formatDistance, uid } from '../util';
-import { showHome } from './home';
+import { openRoomMenu } from './roomMenu';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -43,13 +51,26 @@ let compassStop: CompassStop | null = null;
 let compassBearing = 0;
 // Rapporteur (cercle trigo) : instancié à la création de la carte.
 let protractor: Protractor | null = null;
+// Quadrillage kilométrique UTM (option du tiroir).
+let grid: CoordGrid | null = null;
 
-// Outils d'esquisse présentés (chacun a un bouton #tool-<mode>).
-type SketchMode = 'measure' | 'line' | 'arrow' | 'polygon';
+// Outils d'esquisse présentés (chacun a un bouton #tool-<mode>) ; 'mission'
+// se lance depuis le panneau Tac, sans bouton dédié.
+type SketchMode = 'measure' | 'line' | 'arrow' | 'polygon' | 'mission';
 const DISPLAYED_TOOLS = ['measure', 'line', 'arrow', 'polygon'] as const;
 let sketch: PolylineSketch | null = null;
 let sketchMode: SketchMode = 'measure';
 let sketchColor = '#e8d44d';
+// Figuré de mission en cours de tracé (mode 'mission') et son aperçu en
+// direct (le figuré réel, semi-transparent, redessiné à chaque déplacement).
+let pendingMission: string | null = null;
+let missionPreview: L.Layer[] = [];
+// Figurés à deux flèches (COUV/SURV/INTERD) : première flèche déjà validée,
+// en attente du tracé de la seconde.
+let missionFirstArm: L.LatLng[] | null = null;
+
+/** Épaisseur de trait des figurés de mission (lisibles sur ortho). */
+const MISSION_WEIGHT = 5;
 // Tracé d'un liseré figé, en attente de finalisation par le menu contextuel.
 let pendingLine: L.LatLng[] | null = null;
 let pendingEchelon: LineEchelon | '' = '';
@@ -63,30 +84,42 @@ let pendingEni: L.LatLng | null = null;
 // Id de l'ordre en cours d'édition (menu point/ENI rouvert) : la validation
 // réémet le même id (donc écrase le plot) au lieu d'en créer un nouveau.
 let editId: string | null = null;
+// Calque du plot édité : préservé tel quel (l'édition ne déplace pas de calque).
+let editLayer: string | undefined;
 
+/** Calque d'un plot à l'envoi : celui d'origine en édition, sinon l'actif. */
+function plotLayer(): string | undefined {
+  return (editId ? editLayer : activeLayer()) || undefined;
+}
+
+/** Démarrage sur la carte, avec ou sans session : en solo, seuls la géoloc et
+ *  les outils locaux tournent — le socket ne se connecte qu'une fois en salle. */
 export function enterMap(): void {
   const session = state.session;
-  if (!session) return showHome();
-
-  document.body.className = 'screen-map';
-  $('room-code-btn').textContent = session.roomCode;
+  document.body.classList.toggle('solo', !session);
 
   if (!map) initLeaflet();
   // PWA iOS : le conteneur vient d'être affiché — resynchroniser la taille
   // Leaflet, sinon getCenter() (et donc les plots sous le réticule) dérive.
   requestAnimationFrame(() => map?.invalidateSize());
-  markers = new MarkerLayer(map!, session.memberId, (id) => {
-    if (sketch) return;
-    const m = state.members.get(id);
-    if (m) openMemberPopup(m);
-  });
-  markers.sync(state.members);
-  // Réaffiche d'éventuels ordres composés hors-ligne avant la reconnexion.
-  restorePendingOrders();
-  ordersLayer?.sync(state.orders);
+  markers?.setSelfId(session?.memberId ?? null);
+
+  if (session) {
+    $('room-code-btn').textContent = session.roomCode;
+    markers?.sync(state.members);
+    // Réaffiche d'éventuels ordres composés hors-ligne avant la reconnexion.
+    restorePendingOrders();
+    ordersLayer?.sync(state.orders);
+    renderComms();
+  } else {
+    // Les figurés de la carte solo survivent en localStorage : rechargés à
+    // chaque démarrage hors salle. Sync explicite : au boot, le bus n'est pas
+    // encore câblé quand restoreSoloOrders émet 'orders'.
+    restoreSoloOrders();
+    ordersLayer?.sync(state.orders);
+  }
   renderTopbar();
   renderDrawer();
-  renderComms();
   updateReadout();
 
   if (!busWired) {
@@ -94,15 +127,36 @@ export function enterMap(): void {
     busWired = true;
   }
 
-  connectForSession();
+  if (session) {
+    connectForSession();
+    // Garde à jour les libellés d'âge du tiroir (« il y a X min »), s'il est
+    // ouvert — renderDrawer se court-circuite sinon. Cadencé sur les positions
+    // (30 s) : pas besoin de plus fin, et c'est autant de batterie économisée.
+    // Les marqueurs ne sont plus rafraîchis périodiquement : leur seul état
+    // visuel (grisé = déconnecté) ne change que sur événement.
+    drawerTimer ??= setInterval(renderDrawer, POSITION_INTERVAL_MS);
+  }
   startGeo();
+}
 
-  // Garde à jour les libellés d'âge du tiroir (« il y a X min »), s'il est
-  // ouvert — renderDrawer se court-circuite sinon. Cadencé sur les positions
-  // (30 s) : pas besoin de plus fin, et c'est autant de batterie économisée.
-  // Les marqueurs ne sont plus rafraîchis périodiquement : leur seul état
-  // visuel (grisé = déconnecté) ne change que sur événement.
+/** Bascule l'UI en mode salle après un create/join réussi (session déjà
+ *  sauvegardée, room_state initial appliqué par le socket). */
+export function enterRoomUi(): void {
+  const session = state.session;
+  if (!session) return;
+  document.body.classList.remove('solo');
+  $('room-code-btn').textContent = session.roomCode;
+  markers?.setSelfId(session.memberId);
+  markers?.sync(state.members);
+  restorePendingOrders();
+  ordersLayer?.sync(state.orders);
+  renderTopbar();
+  renderDrawer();
+  renderComms();
+  geo?.resend(); // pousse le fix courant tout de suite, sans attendre le cycle
   drawerTimer ??= setInterval(renderDrawer, POSITION_INTERVAL_MS);
+  // S'il reste des figurés de la carte solo, proposer de les partager ici.
+  offerSoloImport();
 }
 
 // --- boussole : carte « cap en haut » (mobile) ---
@@ -154,25 +208,35 @@ function applyHeading(heading: number): void {
   protractor?.update(); // garde l'anneau aligné sur le nord pendant la rotation
 }
 
-function exitToHome(message?: string): void {
-  stopCompass();
-  protractor?.disable();
-  $('tool-protractor').classList.remove('active');
+/** Sortie de salle (volontaire ou subie) : purge tout ce qui appartient à la
+ *  salle mais laisse la carte vivante — géoloc, boussole, rapporteur et cadrage
+ *  restent tels quels, on continue en solo. */
+function exitToSolo(message?: string): void {
   cancelSketch();
   closeComms();
   resetCommsNotifications();
+  $('drawer').hidden = true; // souvent ouvert : c'est de là qu'on quitte
+  // Les figurés de la salle disparaissent, ceux de la carte solo reviennent.
   ordersLayer?.clear();
-  geo?.stop();
-  geo = null;
+  restoreSoloOrders();
+  ordersLayer?.sync(state.orders);
   if (drawerTimer) {
     clearInterval(drawerTimer);
     drawerTimer = null;
   }
-  markers?.clear();
-  markers = null;
-  hasCentered = false;
-  follow = true;
-  showHome(message);
+  markers?.clearMembers();
+  markers?.setSelfId(null);
+  document.body.classList.add('solo');
+  if (message) {
+    toast(message, {
+      label: 'Rejoindre',
+      onClick: () => {
+        $('toast').hidden = true;
+        const last = loadLastRoom();
+        openRoomMenu(last ? { code: last.roomCode, callsign: last.callsign } : undefined);
+      },
+    });
+  }
 }
 
 function initLeaflet(): void {
@@ -196,20 +260,34 @@ function initLeaflet(): void {
   // Le mode suivi se coupe dès que l'utilisateur déplace la carte.
   map.on('dragstart', () => setFollow(false));
   map.on('move', updateReadout);
-  // Un appui sur la carte referme tiroir et panneau Comms ouverts.
+  // Un appui sur la carte referme tiroir et panneaux (Comms, Tac) ouverts.
   map.on('click', () => {
     if (!$('drawer').hidden) $('drawer').hidden = true;
     if (!$('comms-panel').hidden) closeComms();
+    closeTac();
   });
   // Rotation/redimensionnement (PWA, clavier, barre d'adresse) : resync taille.
   window.addEventListener('resize', () => map?.invalidateSize());
   window.addEventListener('orientationchange', () => setTimeout(() => map?.invalidateSize(), 200));
 
   protractor = new Protractor(map, $('protractor'), $('protractor-readout'));
+  grid = new CoordGrid(map);
 
-  const callsignOf = (id: string): string =>
-    state.members.get(id)?.callsign ??
-    (id === state.session?.memberId ? state.session.callsign : 'inconnu');
+  // Créée une fois pour toute la vie de l'app : le point GPS local vit dedans,
+  // en salle comme en solo ; seuls les marqueurs des coéquipiers vont et viennent.
+  markers = new MarkerLayer(map, (id) => {
+    if (sketch) return;
+    const m = state.members.get(id);
+    if (m) openMemberPopup(m);
+  });
+
+  const callsignOf = (id: string): string => {
+    if (id === SOLO_AUTHOR) return 'moi';
+    return (
+      state.members.get(id)?.callsign ??
+      (id === state.session?.memberId ? state.session.callsign : 'inconnu')
+    );
+  };
 
   ordersLayer = new OrdersLayer(map, {
     // Tous les membres ont les mêmes droits : chacun peut effacer/modifier un tracé/plot.
@@ -218,10 +296,12 @@ function initLeaflet(): void {
     onEdit: (w) => editPlot(w),
     authorName: callsignOf,
     selfLatLng: () => {
-      const p = state.session && state.members.get(state.session.memberId)?.lastPosition;
+      // Dernier fix GPS local : disponible en salle comme en solo.
+      const p = geo?.getLastFix();
       return p ? [p.lat, p.lng] : null;
     },
     isSketching: () => sketch !== null,
+    isLayerHidden: (layer) => isLayerHidden(layer),
   });
 }
 
@@ -245,11 +325,14 @@ function wireBus(): void {
     renderTopbar(); // badges (éléments en attente + non-lus Comms)
   });
 
+  // Visibilité ou calque actif modifiés : re-filtrer les figurés affichés.
+  bus.on('overlays', () => ordersLayer?.sync(state.orders));
+
   bus.on('conn', () => renderConn());
 
   bus.on('rejoined', () => geo?.resend());
 
-  bus.on('session-lost', (msg) => exitToHome((msg as string) ?? 'Session expirée.'));
+  bus.on('session-lost', (msg) => exitToSolo((msg as string) ?? 'Session expirée.'));
 }
 
 // --- géolocalisation ---
@@ -269,26 +352,28 @@ function startGeo(): void {
 }
 
 function onOwnFix(p: Position): void {
+  markers?.setSelf(p);
   const session = state.session;
-  if (!session) return;
-  // Le serveur n'écho pas nos propres positions : mise à jour locale.
-  let me = state.members.get(session.memberId);
-  if (!me) {
-    me = {
-      id: session.memberId,
-      callsign: session.callsign,
-      role: session.role,
-      isLeader: session.isLeader,
-      connected: true,
-      lastSeen: Date.now(),
-      lastPosition: p,
-    };
-    state.members.set(me.id, me);
-  } else {
-    me.lastPosition = p;
-    me.lastSeen = Date.now();
+  if (session) {
+    // Le serveur n'écho pas nos propres positions : entrée roster synthétique,
+    // dont dépendent le tiroir, Comms et la distance des plots (selfLatLng).
+    let me = state.members.get(session.memberId);
+    if (!me) {
+      me = {
+        id: session.memberId,
+        callsign: session.callsign,
+        role: session.role,
+        isLeader: session.isLeader,
+        connected: true,
+        lastSeen: Date.now(),
+        lastPosition: p,
+      };
+      state.members.set(me.id, me);
+    } else {
+      me.lastPosition = p;
+      me.lastSeen = Date.now();
+    }
   }
-  markers?.upsert(me);
   if (follow || !hasCentered) {
     map?.setView([p.lat, p.lng], hasCentered ? map.getZoom() : 15);
     hasCentered = true;
@@ -302,51 +387,114 @@ function setFollow(v: boolean): void {
 
 // --- mesure et tracés (liserés / flèches) ---
 
+/** Sélectionne une couleur d'esquisse (état + pastilles + tracé en cours). */
+function selectSketchColor(color: string): void {
+  sketchColor = color;
+  document.querySelectorAll<HTMLButtonElement>('#sketch-colors .color-dot').forEach((el) => {
+    el.classList.toggle('selected', el.dataset.color === color);
+  });
+  sketch?.setColor(color);
+}
+
 function setActiveTool(mode: SketchMode | null): void {
   for (const m of DISPLAYED_TOOLS) {
     $(`tool-${m}`).classList.toggle('active', m === mode);
   }
 }
 
-function startSketch(mode: SketchMode): void {
+function startSketch(mode: SketchMode, missionId?: string): void {
   if (!map) return;
-  cancelSketch();
+  cancelSketch(); // remet aussi pendingMission à null : le poser après
   sketchMode = mode;
+  pendingMission = mode === 'mission' ? (missionId ?? null) : null;
   setFollow(false);
   setActiveTool(mode);
 
   const isMeasure = mode === 'measure';
   $('sketch-colors').hidden = isMeasure;
   $('sketch-ok').textContent = isMeasure ? 'Fermer' : 'Valider';
-  const btn = $(`tool-${mode}`);
   const bar = $('sketchbar');
-  if (isMeasure) {
-    // Mesure : la barre reste enfant de #map-screen et s'ancre en bas-centre
-    // (hors de l'axe de visée). Logée dans la rangée du bouton mesure — haute
-    // dans la pile, donc proche du centre vertical — elle masquait le réticule
-    // central qu'on pointe justement pour mesurer.
+  if (isMeasure || mode === 'mission') {
+    // Mesure et mission : la barre reste enfant de #map-screen et s'ancre en
+    // bas-centre (hors de l'axe de visée). La mesure masquait le réticule
+    // central qu'on pointe justement ; la mission n'a pas de bouton d'outil.
     bar.classList.add('measure-hud');
     $('map-screen').appendChild(bar);
   } else {
     // La barre contextuelle vient se loger à gauche du bouton de l'outil actif.
+    const btn = $(`tool-${mode}`);
     bar.classList.remove('measure-hud');
     btn.parentElement!.insertBefore(bar, btn);
   }
   bar.hidden = false;
 
+  spawnSketch();
+}
+
+/** (Re)crée l'esquisse pilotée au réticule — appelé au départ d'un outil et
+ *  entre les deux flèches d'un figuré COUV/SURV/INTERD. */
+function spawnSketch(): void {
+  if (!map) return;
+  const isMeasure = sketchMode === 'measure';
+  // Un figuré de mission s'annonce dans la barre : « FIX · 250 m »
+  // (« COUV 2/2 · 250 m » pour la seconde flèche d'un figuré double).
+  const def = sketchMode === 'mission' && pendingMission ? missionDef(pendingMission) : undefined;
+  const abbr = def ? `${def.abbr}${def.twoArrows ? (missionFirstArm ? ' 2/2' : ' 1/2') : ''}` : null;
   sketch = new PolylineSketch(map, {
     color: isMeasure ? '#d9a13b' : sketchColor,
     onChange: (_points, previewM) => {
-      $('sketch-info').textContent = formatDistance(previewM);
+      const dist = formatDistance(previewM);
+      $('sketch-info').textContent = abbr ? `${abbr} · ${dist}` : dist;
+      if (sketchMode === 'mission') updateMissionPreview();
     },
   });
   // Origine sous le réticule : déplacer la carte étire l'aperçu.
   sketch.addVertexAtCenter();
 }
 
+/** Aperçu en direct du figuré de mission : le dessin final, semi-transparent,
+ *  recalculé sur l'axe origine → réticule à chaque déplacement de la carte.
+ *  Pour un figuré double, la première flèche validée reste dans l'aperçu. */
+function updateMissionPreview(): void {
+  clearMissionPreview();
+  if (!map || !sketch || !pendingMission) return;
+  const def = missionDef(pendingMission);
+  const pts = sketch.getFinalPoints();
+  let seq: L.LatLng[];
+  if (def?.twoArrows) {
+    // Chaque flèche est réduite à ses extrémités (le rendu attend 0–1 / 2–3).
+    const arm = pts.length >= 2 ? [pts[0]!, pts[pts.length - 1]!] : pts;
+    seq = [...(missionFirstArm ?? []), ...arm];
+  } else {
+    seq = pts;
+  }
+  if (seq.length < 2) return;
+  const latlngs = seq.map((p) => [p.lat, p.lng] as [number, number]);
+  missionPreview = renderMission(map, pendingMission, latlngs, sketchColor, MISSION_WEIGHT, {
+    interactive: false,
+    opacity: 0.55,
+  });
+  for (const l of missionPreview) l.addTo(map);
+}
+
+function clearMissionPreview(): void {
+  for (const l of missionPreview) l.remove();
+  missionPreview = [];
+}
+
+/** Depuis le panneau Tac : trace l'axe du figuré (origine → réticule). Les
+ *  figurés amis sont bleus par doctrine : présélectionne cette couleur. */
+function startMissionSketch(missionId: string): void {
+  selectSketchColor('#00a8ff');
+  startSketch('mission', missionId);
+}
+
 function cancelSketch(): void {
   sketch?.destroy();
   sketch = null;
+  clearMissionPreview();
+  pendingMission = null;
+  missionFirstArm = null;
   $('sketchbar').hidden = true;
   setActiveTool(null);
 }
@@ -369,6 +517,24 @@ function finishSketch(): void {
     sendGraphic(points, { color: sketchColor, weight: 4, arrow: true });
     return;
   }
+  if (mode === 'mission') {
+    const mission = pendingMission;
+    const def = mission ? missionDef(mission) : undefined;
+    const arm = [points[0]!, points[points.length - 1]!];
+    if (def?.twoArrows && !missionFirstArm) {
+      // Première flèche validée : on enchaîne sur le tracé de la seconde.
+      missionFirstArm = arm;
+      sketch?.destroy();
+      spawnSketch();
+      toast('Première flèche posée — tracez la seconde.');
+      return;
+    }
+    // Figuré double : points 0–1 = 1re flèche, 2–3 = 2de (cf. renderMission).
+    const all = def?.twoArrows && missionFirstArm ? [...missionFirstArm, ...arm] : points;
+    cancelSketch();
+    if (mission) sendGraphic(all, { color: sketchColor, weight: MISSION_WEIGHT, mission });
+    return;
+  }
   if (mode === 'polygon') {
     if (points.length < 3) {
       toast('Posez au moins 3 sommets pour une box.');
@@ -384,12 +550,15 @@ function finishSketch(): void {
   openLineMenu(points);
 }
 
-/** Transmet un ordre graphique (optimiste : affiché tout de suite, file d'attente
- *  vidée à la (re)connexion — voir sendOrder). */
+/** Transmet un ordre graphique — vers la salle (optimiste + file hors-ligne),
+ *  ou appliqué à la carte solo persistée (voir submitOrder). Le figuré part
+ *  dans le calque actif (panneau Tac) ; sans calque choisi = Général. */
 function sendGraphic(points: L.LatLng[], style: GraphicStyle): void {
-  sendOrder({
+  const layer = activeLayer();
+  if (layer) style.layer = layer;
+  submitOrder({
     id: uid(),
-    authorId: state.session!.memberId,
+    authorId: orderAuthor(),
     ts: Date.now(),
     kind: 'graphic',
     payload: {
@@ -477,7 +646,7 @@ function closeBoxMenu(): void {
 // Tap sur l'outil = capture du point sous le réticule, puis menu nom + couleur.
 
 function beginPoint(): void {
-  if (!map || !state.session) return;
+  if (!map) return;
   cancelSketch();
   editId = null; // création, pas édition
   pendingPoint = map.getCenter();
@@ -488,15 +657,15 @@ function beginPoint(): void {
 }
 
 function confirmPointMenu(): void {
-  if (!pendingPoint || !state.session) return;
+  if (!pendingPoint) return;
   const name = $<HTMLInputElement>('point-name').value.trim() || 'Point';
   const c = pendingPoint;
-  sendOrder({
+  submitOrder({
     id: editId ?? uid(), // même id en édition → écrase le plot
-    authorId: state.session.memberId,
+    authorId: orderAuthor(),
     ts: Date.now(),
     kind: 'waypoint',
-    payload: { kind: 'waypoint', name, lat: c.lat, lng: c.lng, color: pointColor },
+    payload: { kind: 'waypoint', name, lat: c.lat, lng: c.lng, color: pointColor, layer: plotLayer() },
   });
   closePointMenu();
 }
@@ -507,10 +676,25 @@ function closePointMenu(): void {
   editId = null;
 }
 
+/** Efface tous les figurés et tracés visibles — pour toute la salle si on y
+ *  est (chacun a les mêmes droits), sinon la carte solo. Confirmation requise. */
+function clearWholeMap(): void {
+  const count = visibleGraphics(state.orders).length + visibleWaypoints(state.orders).length;
+  if (count === 0) {
+    toast('Rien à effacer.');
+    return;
+  }
+  const target = state.session ? 'de la salle (pour tout le monde)' : 'de la carte';
+  if (!confirm(`Effacer les ${count} figuré(s) et tracé(s) ${target} ?`)) return;
+  for (const g of visibleGraphics(state.orders)) deleteOrder(g.id);
+  for (const w of visibleWaypoints(state.orders)) deleteOrder(w.id);
+  $('drawer').hidden = true;
+}
+
 function deleteOrder(orderId: string): void {
-  sendOrder({
+  submitOrder({
     id: uid(),
-    authorId: state.session!.memberId,
+    authorId: orderAuthor(),
     ts: Date.now(),
     kind: 'remove',
     payload: { kind: 'remove', orderId },
@@ -522,7 +706,7 @@ function deleteOrder(orderId: string): void {
 // du point nommé) ; le texte devient la désignation affichée près du losange.
 
 function beginEni(): void {
-  if (!map || !state.session) return;
+  if (!map) return;
   cancelSketch(); // un plot ENI interrompt une éventuelle esquisse en cours
   editId = null; // création, pas édition
   pendingEni = map.getCenter();
@@ -533,15 +717,15 @@ function beginEni(): void {
 }
 
 function confirmEniMenu(): void {
-  if (!pendingEni || !state.session) return;
+  if (!pendingEni) return;
   const name = $<HTMLInputElement>('eni-name').value.trim() || 'ENI';
   const c = pendingEni;
-  sendOrder({
+  submitOrder({
     id: editId ?? uid(), // même id en édition → écrase le plot
-    authorId: state.session.memberId,
+    authorId: orderAuthor(),
     ts: Date.now(),
     kind: 'waypoint',
-    payload: { kind: 'waypoint', name, lat: c.lat, lng: c.lng, sidc: HOSTILE_SIDC },
+    payload: { kind: 'waypoint', name, lat: c.lat, lng: c.lng, sidc: HOSTILE_SIDC, layer: plotLayer() },
   });
   closeEniMenu();
 }
@@ -558,11 +742,12 @@ function closeEniMenu(): void {
  * avec le même id (cf. `editId`), écrasant le plot chez tout le monde.
  */
 function editPlot(w: WaypointOrder): void {
-  if (!map || !state.session) return;
+  if (!map) return;
   cancelSketch();
   closePointMenu();
   closeEniMenu();
   editId = w.id;
+  editLayer = w.layer;
   if (w.color != null) {
     pendingPoint = L.latLng(w.lat, w.lng);
     pointColor = w.color;
@@ -644,6 +829,94 @@ function closeCoordSearch(): void {
   $('coord-search-menu').hidden = true;
 }
 
+// --- recherche de lieu (géocodage IGN : communes, adresses, lieux-dits) ---
+
+let placeTimer: ReturnType<typeof setTimeout> | null = null;
+let placeAbort: AbortController | null = null;
+let placeResults: PlaceResult[] = [];
+
+function openPlaceSearch(): void {
+  const input = $<HTMLInputElement>('place-input');
+  input.value = '';
+  renderPlaceResults([]);
+  placeStatus(null);
+  $('place-menu').hidden = false;
+  input.focus();
+}
+
+function closePlaceSearch(): void {
+  $('place-menu').hidden = true;
+  placeAbort?.abort();
+  placeAbort = null;
+  if (placeTimer) {
+    clearTimeout(placeTimer);
+    placeTimer = null;
+  }
+}
+
+function placeStatus(msg: string | null): void {
+  const el = $('place-status');
+  el.hidden = !msg;
+  el.textContent = msg ?? '';
+}
+
+/** Saisie → recherche débouncée ; une frappe annule la requête en vol. */
+function onPlaceInput(): void {
+  const q = $<HTMLInputElement>('place-input').value.trim();
+  if (placeTimer) clearTimeout(placeTimer);
+  placeAbort?.abort();
+  placeAbort = null;
+  if (q.length < 3) {
+    renderPlaceResults([]);
+    placeStatus(null);
+    return;
+  }
+  placeTimer = setTimeout(() => {
+    const ctrl = new AbortController();
+    placeAbort = ctrl;
+    searchPlaces(q, ctrl.signal)
+      .then((results) => {
+        if (ctrl.signal.aborted) return;
+        renderPlaceResults(results);
+        placeStatus(results.length ? null : 'Aucun résultat.');
+      })
+      .catch((err: unknown) => {
+        if ((err as { name?: string }).name === 'AbortError') return;
+        renderPlaceResults([]);
+        placeStatus('Recherche indisponible (hors-ligne ?).');
+      });
+  }, 300);
+}
+
+function renderPlaceResults(results: PlaceResult[]): void {
+  placeResults = results;
+  const list = $('place-results');
+  list.hidden = results.length === 0;
+  list.replaceChildren();
+  for (const [i, r] of results.entries()) {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'place-result';
+    const name = document.createElement('span');
+    name.textContent = r.name;
+    const ctx = document.createElement('small');
+    ctx.textContent = r.context;
+    btn.append(name, ctx);
+    btn.addEventListener('click', () => goToPlace(i));
+    li.appendChild(btn);
+    list.appendChild(li);
+  }
+}
+
+function goToPlace(index: number): void {
+  const r = placeResults[index];
+  if (!r || !map) return;
+  closePlaceSearch();
+  setFollow(false); // on va à un lieu précis : plus de recadrage auto
+  map.setView([r.lat, r.lng], Math.max(map.getZoom(), 14));
+}
+
 function renderCoordFormat(): void {
   const fmt = getCoordFormat();
   document.querySelectorAll<HTMLButtonElement>('#coord-format button').forEach((btn) => {
@@ -657,7 +930,7 @@ function openMemberPopup(m: MemberPublic): void {
   const div = document.createElement('div');
   div.className = 'order-popup';
   div.innerHTML =
-    `<b>${escapeHtml(m.callsign)}${DESIG_TAG(m.role)}</b>` +
+    `<b>${escapeHtml(m.callsign)}</b>` +
     coordsWithAltitudeHtml(p.lat, p.lng) +
     `<span class="order-author">±${Math.round(p.accuracy)} m · ${memberMeta(m, Date.now())}</span>`;
   hydrateAltitudes(div);
@@ -674,13 +947,6 @@ function renderConn(): void {
     : state.conn === 'reconnecting' ? 'Reconnexion…'
     : 'Hors ligne';
 }
-
-// Pastille de désignation (10 / 22 / 22A) affichée à côté de l'indicatif ;
-// vide pour le CDU et les GV.
-const DESIG_TAG = (role: string): string => {
-  const d = roleDesignation(role);
-  return d ? `<span class="ent-tag">${d}</span>` : '';
-};
 
 function renderTopbar(): void {
   const connected = [...state.members.values()].filter((m) => m.connected).length;
@@ -712,8 +978,7 @@ function renderDrawer(): void {
     if (!m.connected) li.classList.add('offline');
     const meta = memberMeta(m, now);
     li.innerHTML =
-      `<span class="m-symbol">${roleFigure(m.role, 18)}</span>` +
-      `<span class="m-callsign">${escapeHtml(m.callsign)}${DESIG_TAG(m.role)}</span>` +
+      `<span class="m-callsign">${escapeHtml(m.callsign)}</span>` +
       `<span class="m-meta">${meta}</span>`;
     if (m.lastPosition) {
       const btn = document.createElement('button');
@@ -747,6 +1012,10 @@ function ago(ms: number, fresh = ''): string {
 export function initMapView(): void {
   // Panneau latéral « Comms » (chat libre de la salle).
   initCommsPanel({ notify: (text) => toast(text) });
+  // Panneau « Tac » : figurés de mission.
+  initTacPanel({ startMission: startMissionSketch });
+  // Bandeau des calques d'affichage (haut de l'écran).
+  initLayerBanner({ notify: (text) => toast(text) });
 
   for (const mode of DISPLAYED_TOOLS) {
     $(`tool-${mode}`).addEventListener('click', () => {
@@ -767,6 +1036,17 @@ export function initMapView(): void {
   $('tool-protractor').addEventListener('click', toggleProtractor);
   $('sketch-add').addEventListener('click', () => sketch?.addVertexAtCenter());
 
+  // Recherche de lieu (haut gauche) : communes, adresses, lieux-dits IGN.
+  $('btn-place').addEventListener('click', openPlaceSearch);
+  $('place-cancel').addEventListener('click', closePlaceSearch);
+  $<HTMLInputElement>('place-input').addEventListener('input', onPlaceInput);
+  $<HTMLInputElement>('place-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') goToPlace(0); // premier résultat
+  });
+  $('place-menu').addEventListener('click', (e) => {
+    if (e.target === $('place-menu')) closePlaceSearch();
+  });
+
   // Recherche de coordonnées (loupe) : saisie MGRS / lat-lng puis « Y aller ».
   $('coord-search').addEventListener('click', openCoordSearch);
   $('coord-search-ok').addEventListener('click', confirmCoordSearch);
@@ -785,6 +1065,20 @@ export function initMapView(): void {
     updateReadout();
     renderCoordFormat();
   });
+
+  // Quadrillage kilométrique : bascule Affiché / Masqué dans le tiroir.
+  const renderGridToggle = (): void => {
+    document.querySelectorAll<HTMLButtonElement>('#grid-toggle button').forEach((btn) => {
+      btn.classList.toggle('selected', (btn.dataset.grid === 'on') === gridEnabled());
+    });
+  };
+  document.querySelectorAll<HTMLButtonElement>('#grid-toggle button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      grid?.setEnabled(btn.dataset.grid === 'on');
+      renderGridToggle();
+    });
+  });
+  renderGridToggle();
 
   // --- panneau de diagnostic veille (masqué — conservé pour un usage ultérieur) ---
   let diagUnsub: (() => void) | null = null;
@@ -842,12 +1136,7 @@ export function initMapView(): void {
   $('point-cancel').addEventListener('click', closePointMenu);
   document.querySelectorAll<HTMLButtonElement>('#sketch-colors .color-dot').forEach((dot, i) => {
     if (i === 0) dot.classList.add('selected');
-    dot.addEventListener('click', () => {
-      sketchColor = dot.dataset.color!;
-      document.querySelectorAll('#sketch-colors .color-dot').forEach((el) => el.classList.remove('selected'));
-      dot.classList.add('selected');
-      sketch?.setColor(sketchColor);
-    });
+    dot.addEventListener('click', () => selectSketchColor(dot.dataset.color!));
   });
 
   $('btn-locate').addEventListener('click', () => {
@@ -863,10 +1152,13 @@ export function initMapView(): void {
     if (!drawer.hidden) renderDrawer();
   });
 
+  $('btn-room').addEventListener('click', () => openRoomMenu());
+  $('btn-clear-map').addEventListener('click', clearWholeMap);
+
   $('btn-leave').addEventListener('click', () => {
     if (!confirm('Quitter la salle ?')) return;
     leaveRoom();
-    exitToHome();
+    exitToSolo();
   });
 
   $('room-code-btn').addEventListener('click', async () => {

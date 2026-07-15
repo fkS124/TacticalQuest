@@ -57,6 +57,11 @@ export interface GraphicStyle {
   echelon?: LineEchelon;
   /** Polygone fermé semi-transparent (box / zone) ; le nom se pose au centre. */
   polygon?: boolean;
+  /** Figuré de mission (RECO, FIX, DEF…) dessiné le long de l'axe tracé ;
+   *  identifiant du catalogue client (map/missions.ts), inconnu → ligne simple. */
+  mission?: string;
+  /** Calque d'affichage : filtrage purement local chez chaque client. */
+  layer?: string;
 }
 
 export type OrderPayload =
@@ -64,7 +69,8 @@ export type OrderPayload =
   | { kind: 'text'; body: string }
   // `sidc` → symbole milsymbol (plot ENI) ; `color` → rond de couleur + nom
   // (point nommé). Les deux s'excluent : `color` prime au rendu.
-  | { kind: 'waypoint'; name: string; lat: number; lng: number; sidc?: string; color?: string }
+  // `layer` : calque d'affichage, filtrage purement local chez chaque client.
+  | { kind: 'waypoint'; name: string; lat: number; lng: number; sidc?: string; color?: string; layer?: string }
   | { kind: 'graphic'; geojson: unknown; style?: GraphicStyle }
   | { kind: 'remove'; orderId: string }
   | { kind: 'ack'; orderId: string };

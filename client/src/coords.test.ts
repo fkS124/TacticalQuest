@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { forward as mgrsForward } from 'mgrs';
-import { formatCoords, latitudeBand, parseCoords, toUtm, utmZone } from './coords';
+import { formatCoords, fromUtm, latitudeBand, parseCoords, toUtm, utmZone } from './coords';
 
 // Notre UTM est validé par recoupement avec le paquet mgrs : dans un carré
 // de 100 km, les chiffres MGRS sont l'easting/northing UTM modulo 100 000.
@@ -24,6 +24,27 @@ describe('toUtm — recoupement avec la grille MGRS', () => {
       expect(Math.floor(utm.northing) % 100000).toBeCloseTo(Number(m[5]), -1);
     });
   }
+});
+
+describe('fromUtm — réciproque de toUtm', () => {
+  it('aller-retour < 1 m sur les échantillons', () => {
+    for (const [, lat, lng] of SAMPLES) {
+      const u = toUtm(lat, lng);
+      const back = fromUtm(u.zone, u.easting, u.northing, lat < 0);
+      // 1e-5° ≈ 1 m
+      expect(Math.abs(back.lat - lat)).toBeLessThan(1e-5);
+      expect(Math.abs(back.lng - lng)).toBeLessThan(1e-5);
+    }
+  });
+
+  it('zone imposée : projection continue hors de la zone native', () => {
+    // Point en zone 32 (7,2°E) projeté en zone 31 : l'aller-retour retombe juste.
+    const u = toUtm(48.5, 7.2, 31);
+    expect(u.zone).toBe(31);
+    const back = fromUtm(31, u.easting, u.northing);
+    expect(Math.abs(back.lat - 48.5)).toBeLessThan(1e-5);
+    expect(Math.abs(back.lng - 7.2)).toBeLessThan(1e-5);
+  });
 });
 
 describe('zones et bandes', () => {
