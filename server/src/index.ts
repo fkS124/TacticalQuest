@@ -30,13 +30,16 @@ app.disable('x-powered-by');
 // script-src 'self' interdit tout JS injecté. 'unsafe-inline' est nécessaire
 // UNIQUEMENT pour le CSS — Leaflet injecte une <style> et l'app pose des styles
 // en ligne (couleurs des figurés déjà passées par safeColor). Les hôtes listés
-// sont les fonds de carte (img) + géocodage IGN et altitude (connect).
+// sont les fonds de carte (img) + géocodage IGN et altitude (connect). Les
+// hôtes de tuiles figurent AUSSI dans connect-src : le service worker les
+// récupère par fetch(), régi par connect-src — sinon tuile bloquée et
+// remplacée par le PNG de secours du SW (cf. TILE_HOSTS de client/public/sw.js).
 const CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https://data.geopf.fr https://server.arcgisonline.com https://*.tile.opentopomap.org",
-  "connect-src 'self' https://data.geopf.fr https://api.open-meteo.com",
+  "connect-src 'self' https://data.geopf.fr https://server.arcgisonline.com https://*.tile.opentopomap.org https://api.open-meteo.com",
   "worker-src 'self'",
   "manifest-src 'self'",
   "font-src 'self'",

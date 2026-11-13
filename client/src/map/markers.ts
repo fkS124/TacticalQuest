@@ -27,9 +27,6 @@ const MEMBER_ICON_OFF = L.divIcon({
   iconAnchor: [6.5, 6.5],
 });
 
-/** Au-delà (rayon en px écran), le cercle de précision n'est plus dessiné. */
-const MAX_ACCURACY_PX = 4000;
-
 /**
  * Positions sur la carte : soi-même en point GPS bleu (alimenté directement par
  * les fixes locaux, donc fonctionnel hors salle), les coéquipiers en points de
@@ -39,7 +36,6 @@ export class MarkerLayer {
   private readonly tracked = new Map<string, Tracked>();
   private selfMarker: L.Marker | null = null;
   private accuracyCircle: L.Circle | null = null;
-  private accuracy: { lat: number; lng: number; radius: number } | null = null;
   private selfId: string | null = null;
 
   constructor(
@@ -127,7 +123,6 @@ export class MarkerLayer {
   }
 
   private updateAccuracy(lat: number, lng: number, accuracy: number): void {
-    this.accuracy = { lat, lng, radius: accuracy };
     if (!this.accuracyCircle) {
       // Contour seul : rempli, un fix peu précis (mode basse conso) couvre
       // tout l'écran et pose un voile bleu uniforme sur la carte.
@@ -137,34 +132,10 @@ export class MarkerLayer {
         color: '#0033ff',
         fill: false,
         interactive: false,
-      });
-      this.map.on('zoomend moveend resize', this.refreshAccuracy);
+      }).addTo(this.map);
     } else {
       this.accuracyCircle.setLatLng([lat, lng]);
       this.accuracyCircle.setRadius(accuracy);
     }
-    this.refreshAccuracy();
   }
-
-  /**
-   * N'affiche le cercle de précision que s'il apporte une information : un
-   * cercle qui englobe tout l'écran (fix iOS « position approximative » à
-   * plusieurs km, carte zoomée) n'a pas de contour visible — et WebKit rend
-   * mal ces arcs SVG géants (Leaflet ne les découpe pas) : voile bleu uniforme
-   * sur toute la carte. On le retire donc dans ce cas.
-   */
-  private refreshAccuracy = (): void => {
-    const circle = this.accuracyCircle;
-    const a = this.accuracy;
-    if (!circle || !a) return;
-    const c = this.map.latLngToContainerPoint([a.lat, a.lng]);
-    const n = this.map.latLngToContainerPoint([a.lat + a.radius / 111320, a.lng]);
-    const r = c.distanceTo(n);
-    const size = this.map.getSize();
-    const corners = [L.point(0, 0), L.point(size.x, 0), L.point(0, size.y), size];
-    const enclosesView = corners.every((p) => c.distanceTo(p) < r);
-    const show = Number.isFinite(r) && r <= MAX_ACCURACY_PX && !enclosesView;
-    if (show && !this.map.hasLayer(circle)) circle.addTo(this.map);
-    else if (!show && this.map.hasLayer(circle)) circle.remove();
-  };
 }

@@ -12,7 +12,9 @@
 const SHELL_CACHE = 'tq-shell-v1';
 const TILE_CACHE = 'tq-tiles-v1';
 
-// Garder synchronisé avec client/src/map/layers.ts
+// Garder synchronisé avec client/src/map/layers.ts ET la CSP serveur
+// (server/src/index.ts) : img-src pour les <img>, connect-src pour le fetch()
+// de ce service worker.
 const TILE_HOSTS = [
   'tile.opentopomap.org',
   'server.arcgisonline.com',
@@ -26,9 +28,11 @@ const QUOTA_MAX_RATIO = 0.8;
 
 let insertsSinceCheck = 0;
 
-// PNG transparent 1×1 : évite que Leaflet affiche des tuiles cassées hors-ligne.
+// PNG transparent 1×1 (RGBA 0,0,0,0) : évite que Leaflet affiche des tuiles
+// cassées hors-ligne. Attention : l'ancien base64 « 1×1 » répandu sur le web est
+// un pixel BLEU à 50 % — il voilait de bleu tout fond « Sat » (surcouche routes).
 const TRANSPARENT_PNG = Uint8Array.from(
-  atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='),
+  atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNgYGBgAAAABQABeqhXUAAAAABJRU5ErkJggg=='),
   (c) => c.charCodeAt(0),
 );
 
